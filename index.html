@@ -58,6 +58,18 @@
     <section id="step-plans" class="card" hidden>
       <h2><span class="step">3</span> Enter the plans to compare</h2>
       <p class="section-intro">Add your current plan and any others you're considering. For time-of-use plans, define the peak/shoulder/off-peak windows below — anything not covered by a window uses the plan's default rate.</p>
+
+      <div id="catalog-picker" class="catalog-picker" hidden>
+        <h3>Load a published plan</h3>
+        <p class="chart-note">Pre-fill rates straight from the public Consumer Data Right plan data <span id="catalog-meta"></span>. Pick one, then tweak anything you like — it becomes an ordinary editable plan below.</p>
+        <div class="picker-row">
+          <label class="field"><span>Network / distributor</span><select id="catalog-dist"></select></label>
+          <label class="field"><span>Search brand or plan</span><input type="text" id="catalog-search" placeholder="e.g. Saver, EV, solar" /></label>
+          <label class="field picker-plan"><span>Plan (<span id="catalog-count">0</span>)</span><select id="catalog-plan"></select></label>
+          <button type="button" id="catalog-add" class="btn">Add this plan</button>
+        </div>
+      </div>
+
       <div id="plans-container"></div>
       <div class="plan-actions">
         <button type="button" id="add-plan" class="btn">+ Add a plan</button>

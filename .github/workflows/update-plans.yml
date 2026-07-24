@@ -1,0 +1,45 @@
+name: Update electricity plans
+
+on:
+  schedule:
+    - cron: "0 17 * * *"   # daily, ~03:00 AEST
+  workflow_dispatch:        # allow manual runs from the Actions tab
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-plans
+  cancel-in-progress: true
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Verify normaliser
+        run: node scripts/test-normalize.mjs
+
+      - name: Fetch CDR plan data
+        run: node scripts/fetch-plans.mjs
+        env:
+          MAX_PLANS: "600"
+
+      - name: Commit updated catalogue
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- data/plans.json; then
+            echo "No plan changes."
+          else
+            git add data/plans.json
+            git commit -m "Update electricity plan catalogue ($(date -u +%Y-%m-%d))"
+            git push
+          fi

@@ -1,0 +1,11 @@
+{
+  "_comment": "Seed list of Australian CDR energy Product Reference Data base URIs. The fetch script appends /cds-au/v1/energy/plans to each baseUri. This is a STARTING POINT — endpoints that fail are skipped and logged by the workflow, so add/verify entries freely. Retailers hosted by the AER's Energy Made Easy follow the pattern https://cdr.energymadeeasy.gov.au/<code>. The larger retailers host their own CDR endpoints. See https://www.aer.gov.au/energy-product-reference-data for the authoritative list.",
+  "retailers": [
+    { "name": "Ergon Energy", "baseUri": "https://cdr.energymadeeasy.gov.au/ergon" },
+    { "name": "AGL", "baseUri": "https://cdr.agl.com.au" },
+    { "name": "Origin Energy", "baseUri": "https://cdr.originenergy.com.au" },
+    { "name": "EnergyAustralia", "baseUri": "https://cdr.energyaustralia.com.au" },
+    { "name": "Red Energy", "baseUri": "https://cdr.redenergy.com.au" },
+    { "name": "Alinta Energy", "baseUri": "https://cdr.alintaenergy.com.au" }
+  ]
+}

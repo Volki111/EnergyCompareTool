@@ -193,6 +193,23 @@ input[type="number"] { -moz-appearance: textfield; }
 .plan-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
 .saved-note { color: var(--text-dim); font-size: .82rem; margin: 12px 0 0; }
 
+/* Catalogue plan picker */
+.catalog-picker {
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px 18px; margin-bottom: 18px;
+}
+.catalog-picker h3 { margin: 0 0 4px; font-size: 1.05rem; }
+.catalog-picker .chart-note { margin: 0 0 14px; }
+.picker-row { display: grid; grid-template-columns: 1.1fr 1.1fr 1.6fr auto; gap: 12px; align-items: end; }
+.picker-row .field { margin: 0; }
+.picker-row select, .picker-row input {
+  background: var(--bg-card); border: 1px solid var(--border); color: var(--text);
+  border-radius: 8px; padding: 8px 10px; font: inherit; width: 100%;
+}
+.picker-row .btn { white-space: nowrap; }
+#catalog-meta { color: var(--text-dim); }
+@media (max-width: 720px) { .picker-row { grid-template-columns: 1fr 1fr; } .picker-row .picker-plan, .picker-row .btn { grid-column: 1 / -1; } }
+
 /* Load-shifting / optimise */
 .opt-controls { margin-bottom: 18px; }
 .opt-controls .field { max-width: 320px; }

@@ -1,0 +1,9 @@
+{
+  "generatedAt": null,
+  "source": "Australian CDR energy Product Reference Data",
+  "note": "Placeholder. Run the 'Update electricity plans' GitHub Action (or `node scripts/fetch-plans.mjs`) to populate this with real published plans.",
+  "planCount": 0,
+  "distributors": [],
+  "retailers": [],
+  "plans": []
+}

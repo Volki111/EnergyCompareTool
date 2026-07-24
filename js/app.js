@@ -962,6 +962,86 @@
     }
   }
 
+  /* ------------------------------------------------------------------ */
+  /* Published-plan catalogue (from CDR data via GitHub Action)          */
+  /* ------------------------------------------------------------------ */
+
+  let catalog = null;
+
+  function loadCatalog() {
+    fetch("data/plans.json")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data || !data.plans || !data.plans.length) return;
+        catalog = data;
+        buildCatalogPicker();
+      })
+      .catch(() => {});
+  }
+
+  function buildCatalogPicker() {
+    const picker = $("#catalog-picker");
+    picker.hidden = false;
+    if (catalog.generatedAt) {
+      const when = new Date(catalog.generatedAt).toLocaleDateString();
+      $("#catalog-meta").textContent = `(${catalog.planCount} plans, updated ${when})`;
+    }
+    const dist = $("#catalog-dist");
+    dist.innerHTML = `<option value="">All networks</option>` +
+      (catalog.distributors || []).map((d) => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join("");
+    dist.addEventListener("change", refreshCatalogPlans);
+    $("#catalog-search").addEventListener("input", refreshCatalogPlans);
+    $("#catalog-add").addEventListener("click", addCatalogPlan);
+    refreshCatalogPlans();
+  }
+
+  function catalogMatches() {
+    const d = $("#catalog-dist").value;
+    const q = $("#catalog-search").value.trim().toLowerCase();
+    return catalog.plans.filter((p) => {
+      if (d && !(p.distributors || []).includes(d)) return false;
+      if (q) {
+        const hay = ((p.brand || "") + " " + (p.name || "") + " " + (p.retailer || "")).toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }
+
+  function refreshCatalogPlans() {
+    const matches = catalogMatches();
+    $("#catalog-count").textContent = matches.length;
+    const sel = $("#catalog-plan");
+    sel.innerHTML = matches.slice(0, 400)
+      .map((p) => {
+        const idx = catalog.plans.indexOf(p);
+        const label = (p.brand ? p.brand + " — " : "") + (p.name || "Plan") + (p.mode === "tou" ? " (TOU)" : "");
+        return `<option value="${idx}">${escapeHtml(label)}</option>`;
+      }).join("");
+    if (matches.length > 400) sel.innerHTML += `<option disabled>…refine your search to see more</option>`;
+  }
+
+  function addCatalogPlan() {
+    const idx = +$("#catalog-plan").value;
+    const p = catalog.plans[idx];
+    if (!p) return;
+    plans.push({
+      id: ++planSeq,
+      name: (p.brand ? p.brand + " – " : "") + (p.name || "Plan"),
+      supply: p.supply ?? "", controlled: p.controlled ?? "", feedin: p.feedin ?? "", discount: p.discount ?? "",
+      mode: p.mode === "tou" ? "tou" : "flat",
+      flat: p.flat ?? "", touDefault: p.touDefault ?? "",
+      windows: (p.windows || []).map((w) => ({
+        label: w.label || "", rate: w.rate ?? "",
+        days: Array.isArray(w.days) ? w.days.slice() : [1, 2, 3, 4, 5],
+        from: w.from || "00:00", to: w.to || "00:00",
+      })),
+    });
+    renderPlans(); savePlans(); recompute();
+    const cards = $$(".plan");
+    if (cards.length) cards[cards.length - 1].scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
   function exportPlans() {
     const data = JSON.stringify({ app: "energy-compare-tool", version: 1, plans }, null, 2);
     const blob = new Blob([data], { type: "application/json" });
@@ -1036,6 +1116,7 @@
 
   function init() {
     loadPlans();
+    loadCatalog();
 
     const dz = $("#dropzone"), input = $("#file-input");
     $("#browse-btn").addEventListener("click", () => input.click());

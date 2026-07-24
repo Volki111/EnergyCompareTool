@@ -21,6 +21,24 @@ A static, browser-only web app that helps you find the **cheapest electricity pl
   - **Cost by month** — tracks each plan across the months in your data to reveal seasonal swings.
 - **Load-shifting advisor** — for time-of-use plans, works out how much of your usage lands in expensive peak/shoulder periods, groups your spend by rate tier, and lets you drag a slider to estimate savings from moving flexible load (dishwasher, washing, dryer, pool pump, EV charging) to off-peak — with tips that name your plan's actual peak windows.
 - **Saved & portable plans** — plans are stored in your browser (`localStorage`) so they persist between visits, plus **Export/Import** to back them up as a JSON file or move them to another device.
+- **Load real published plans** — pre-fill rates straight from the government's open plan data (see below), filter by your network/distributor, then tweak.
+
+## Real plan data (Consumer Data Right)
+
+Australian electricity retailers are required to publish their generally-available plans through the **Consumer Data Right (CDR)** energy Product Reference Data (PRD) APIs — public, unauthenticated, standardised JSON. This project pulls that data on a schedule so you can load real rates instead of typing them by hand.
+
+How it works (fully static, no backend at runtime):
+
+1. **`scripts/fetch-plans.mjs`** reads a seed list of retailer endpoints (`data/retailers.json`), calls each retailer's `GET /cds-au/v1/energy/plans` and `…/plans/{id}` endpoints, and **normalises** the tariffs into this app's model. CDR prices are in *dollars*; the normaliser converts everything to cents, maps time-of-use windows (peak/shoulder/off-peak, days, times), and pulls in controlled-load and solar feed-in rates.
+2. **`.github/workflows/update-plans.yml`** runs the script on a daily cron (and on demand from the Actions tab), then commits the refreshed **`data/plans.json`** back to the repo.
+3. The front-end loads `data/plans.json` and shows the **"Load a published plan"** picker in step 3. Your usage data still never leaves the browser.
+
+Notes & limitations:
+
+- The seed `data/retailers.json` is a **starting point** — endpoints that don't resolve are skipped and logged; add or correct entries freely. The authoritative retailer list is on the [AER's site](https://www.aer.gov.au/energy-product-reference-data).
+- Covers National Energy Customer Framework states (NSW, QLD, SA, TAS, ACT). Victoria runs a separate scheme.
+- These are list/market rates for residential electricity — not personalised or negotiated discounts. Demand-charge and complex block tariffs aren't fully modelled and are skipped or simplified.
+- Run it locally with `node scripts/fetch-plans.mjs`; unit tests for the normaliser: `node scripts/test-normalize.mjs`.
 
 ## How costs are calculated
 
