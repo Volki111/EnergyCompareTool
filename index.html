@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Energy Compare Tool — Find your cheapest electricity plan</title>
+  <meta name="description" content="Upload your electricity usage data and compare time-of-use plans to find the cheapest. Runs entirely in your browser — your data never leaves your device." />
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <h1>⚡ Energy Compare Tool</h1>
+      <p class="tagline">Upload your electricity usage, enter some plans, and see what's actually cheapest — for <em>your</em> usage.</p>
+      <p class="privacy">🔒 Everything runs in your browser. Your usage data is never uploaded anywhere.</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+
+    <!-- STEP 1: UPLOAD -->
+    <section id="step-upload" class="card">
+      <h2><span class="step">1</span> Upload your usage data</h2>
+      <div id="dropzone" class="dropzone">
+        <input type="file" id="file-input" accept=".csv,text/csv" hidden />
+        <p class="dz-main">Drag &amp; drop your usage CSV here</p>
+        <p class="dz-sub">or <button type="button" id="browse-btn" class="link-btn">browse for a file</button></p>
+        <p class="dz-hint">Works with Australian NMI interval exports (General usage + Controlled load). Don't have yours handy? <button type="button" id="load-sample" class="link-btn">Try sample data</button>.</p>
+      </div>
+      <div id="parse-status" class="status" hidden></div>
+    </section>
+
+    <!-- STEP 2: USAGE SUMMARY -->
+    <section id="step-usage" class="card" hidden>
+      <h2><span class="step">2</span> Your usage at a glance</h2>
+      <div id="stat-grid" class="stat-grid"></div>
+
+      <div class="chart-row">
+        <div class="chart-box">
+          <h3>Average load profile (kWh per half-hour)</h3>
+          <p class="chart-note">When you use power across an average day. Peaks here are what expensive time-of-use periods will hit hardest.</p>
+          <canvas id="profile-chart"></canvas>
+        </div>
+      </div>
+
+      <div class="chart-row">
+        <div class="chart-box">
+          <h3>Usage heatmap — day of week × hour</h3>
+          <p class="chart-note">Darker = more energy used. Helps you spot whether your load lines up with peak windows.</p>
+          <div id="heatmap"></div>
+          <div class="heatmap-legend"><span>Less</span><div id="heatmap-scale"></div><span>More</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- STEP 3: PLANS -->
+    <section id="step-plans" class="card" hidden>
+      <h2><span class="step">3</span> Enter the plans to compare</h2>
+      <p class="section-intro">Add your current plan and any others you're considering. For time-of-use plans, define the peak/shoulder/off-peak windows below — anything not covered by a window uses the plan's default rate.</p>
+      <div id="plans-container"></div>
+      <div class="plan-actions">
+        <button type="button" id="add-plan" class="btn">+ Add a plan</button>
+        <button type="button" id="add-plan-tou" class="btn btn-ghost">+ Add a time-of-use plan</button>
+        <button type="button" id="clear-plans" class="btn btn-ghost btn-danger">Clear all plans</button>
+      </div>
+    </section>
+
+    <!-- STEP 4: RESULTS -->
+    <section id="step-results" class="card" hidden>
+      <h2><span class="step">4</span> The verdict</h2>
+      <div id="verdict" class="verdict"></div>
+      <div class="chart-row">
+        <div class="chart-box">
+          <h3>Estimated annual cost by plan</h3>
+          <p class="chart-note">Based on your uploaded usage, scaled to a full year. Green = cheapest.</p>
+          <canvas id="compare-chart"></canvas>
+        </div>
+      </div>
+      <div id="results-table-wrap" class="table-wrap"></div>
+      <p class="disclaimer">Estimates only. Real bills vary with rounding, seasonal usage, GST, connection fees, membership discounts, demand charges and solar export. Always check the plan's full terms.</p>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p>Built as a static site — no server, no tracking. <a href="https://github.com/Volki111/EnergyCompareTool" rel="noopener">Source on GitHub</a>.</p>
+    </div>
+  </footer>
+
+  <!-- Plan card template -->
+  <template id="plan-template">
+    <div class="plan" data-plan-id="">
+      <div class="plan-head">
+        <input type="text" class="plan-name" placeholder="Plan name" />
+        <button type="button" class="remove-plan" title="Remove plan">✕</button>
+      </div>
+
+      <div class="field-grid">
+        <label class="field">
+          <span>Daily supply charge (c/day)</span>
+          <input type="number" class="p-supply" step="0.01" min="0" placeholder="e.g. 110" />
+        </label>
+        <label class="field">
+          <span>Controlled load rate (c/kWh)</span>
+          <input type="number" class="p-controlled" step="0.01" min="0" placeholder="e.g. 22" />
+          <small>Applied to controlled-load register. Leave blank if none.</small>
+        </label>
+        <label class="field">
+          <span>Solar feed-in (c/kWh)</span>
+          <input type="number" class="p-feedin" step="0.01" min="0" placeholder="e.g. 5" />
+          <small>Credit for exported energy (negative readings).</small>
+        </label>
+        <label class="field">
+          <span>Usage discount (%)</span>
+          <input type="number" class="p-discount" step="0.1" min="0" max="100" placeholder="0" />
+          <small>Pay-on-time / member discount on usage charges.</small>
+        </label>
+      </div>
+
+      <div class="rate-mode">
+        <label><input type="radio" class="mode-flat" name="mode" value="flat" checked /> Flat rate</label>
+        <label><input type="radio" class="mode-tou" name="mode" value="tou" /> Time-of-use</label>
+      </div>
+
+      <div class="flat-block">
+        <label class="field">
+          <span>Flat general usage rate (c/kWh)</span>
+          <input type="number" class="p-flat" step="0.01" min="0" placeholder="e.g. 28" />
+        </label>
+      </div>
+
+      <div class="tou-block" hidden>
+        <label class="field">
+          <span>Default rate for uncovered times (c/kWh)</span>
+          <input type="number" class="p-tou-default" step="0.01" min="0" placeholder="e.g. off-peak 22" />
+          <small>Used when an interval doesn't match any window below (typically your off-peak rate).</small>
+        </label>
+        <table class="tou-table">
+          <thead>
+            <tr><th>Label</th><th>Rate (c/kWh)</th><th>Days</th><th>From</th><th>To</th><th></th></tr>
+          </thead>
+          <tbody class="tou-rows"></tbody>
+        </table>
+        <button type="button" class="add-window btn btn-small">+ Add time window</button>
+      </div>
+    </div>
+  </template>
+
+  <!-- TOU window row template -->
+  <template id="tou-row-template">
+    <tr class="tou-row">
+      <td><input type="text" class="w-label" placeholder="Peak" /></td>
+      <td><input type="number" class="w-rate" step="0.01" min="0" placeholder="45" /></td>
+      <td>
+        <div class="day-picker">
+          <label title="Monday"><input type="checkbox" class="w-day" value="1" checked />M</label>
+          <label title="Tuesday"><input type="checkbox" class="w-day" value="2" checked />T</label>
+          <label title="Wednesday"><input type="checkbox" class="w-day" value="3" checked />W</label>
+          <label title="Thursday"><input type="checkbox" class="w-day" value="4" checked />T</label>
+          <label title="Friday"><input type="checkbox" class="w-day" value="5" checked />F</label>
+          <label title="Saturday"><input type="checkbox" class="w-day" value="6" />S</label>
+          <label title="Sunday"><input type="checkbox" class="w-day" value="0" />S</label>
+        </div>
+      </td>
+      <td><input type="time" class="w-from" value="15:00" /></td>
+      <td><input type="time" class="w-to" value="21:00" /></td>
+      <td><button type="button" class="remove-window" title="Remove window">✕</button></td>
+    </tr>
+  </template>
+
+  <script src="js/chart.umd.min.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
