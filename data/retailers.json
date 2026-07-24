@@ -1,11 +1,20 @@
 {
-  "_comment": "Seed list of Australian CDR energy Product Reference Data base URIs. The fetch script appends /cds-au/v1/energy/plans to each baseUri. This is a STARTING POINT — endpoints that fail are skipped and logged by the workflow, so add/verify entries freely. Retailers hosted by the AER's Energy Made Easy follow the pattern https://cdr.energymadeeasy.gov.au/<code>. The larger retailers host their own CDR endpoints. See https://www.aer.gov.au/energy-product-reference-data for the authoritative list.",
+  "_comment": "Australian CDR energy Product Reference Data endpoints. The fetch script appends /cds-au/v1/energy/plans to each baseUri. These retailers are hosted by the AER's Energy Made Easy (https://cdr.energymadeeasy.gov.au/<code>) and confirmed to return plan data. Endpoints that return nothing are skipped and logged. Some retailers (e.g. Red Energy, Alinta, Simply Energy, Aurora, OVO, Energy Locals, Sumo) publish from their own product base URI rather than Energy Made Easy — add those here once known. Authoritative list: https://www.aer.gov.au/energy-product-reference-data",
   "retailers": [
-    { "name": "Ergon Energy", "baseUri": "https://cdr.energymadeeasy.gov.au/ergon" },
-    { "name": "AGL", "baseUri": "https://cdr.agl.com.au" },
-    { "name": "Origin Energy", "baseUri": "https://cdr.originenergy.com.au" },
-    { "name": "EnergyAustralia", "baseUri": "https://cdr.energyaustralia.com.au" },
-    { "name": "Red Energy", "baseUri": "https://cdr.redenergy.com.au" },
-    { "name": "Alinta Energy", "baseUri": "https://cdr.alintaenergy.com.au" }
+    { "name": "AGL", "baseUri": "https://cdr.energymadeeasy.gov.au/agl" },
+    { "name": "Origin Energy", "baseUri": "https://cdr.energymadeeasy.gov.au/origin" },
+    { "name": "EnergyAustralia", "baseUri": "https://cdr.energymadeeasy.gov.au/energyaustralia" },
+    { "name": "Powershop", "baseUri": "https://cdr.energymadeeasy.gov.au/powershop" },
+    { "name": "ActewAGL", "baseUri": "https://cdr.energymadeeasy.gov.au/actewagl" },
+    { "name": "ENGIE", "baseUri": "https://cdr.energymadeeasy.gov.au/engie" },
+    { "name": "Momentum Energy", "baseUri": "https://cdr.energymadeeasy.gov.au/momentum" },
+    { "name": "Dodo", "baseUri": "https://cdr.energymadeeasy.gov.au/dodo" },
+    { "name": "Tango Energy", "baseUri": "https://cdr.energymadeeasy.gov.au/tango" },
+    { "name": "GloBird Energy", "baseUri": "https://cdr.energymadeeasy.gov.au/globird" },
+    { "name": "Nectr", "baseUri": "https://cdr.energymadeeasy.gov.au/nectr" },
+    { "name": "Amber Electric", "baseUri": "https://cdr.energymadeeasy.gov.au/amber" },
+    { "name": "Kogan Energy", "baseUri": "https://cdr.energymadeeasy.gov.au/kogan" },
+    { "name": "Lumo Energy", "baseUri": "https://cdr.energymadeeasy.gov.au/lumo" },
+    { "name": "Ergon Energy", "baseUri": "https://cdr.energymadeeasy.gov.au/ergon" }
   ]
 }

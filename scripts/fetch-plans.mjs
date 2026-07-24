@@ -22,6 +22,7 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
 import path from "node:path";
 
 const DAY_MAP = { SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6 };
@@ -106,9 +107,15 @@ export function normalizePlanDetail(detail) {
       .map((e) => ({ type: e.type, rate: toCents(e.rates?.[0]?.unitPrice), tou: e.timeOfUse || [] }))
       .filter((e) => e.rate !== null);
     if (!entries.length) return null;
-    touDefault = Math.min(...entries.map((e) => e.rate));
+    // The default (uncovered-time) rate is the OFF_PEAK tariff by type — NOT the
+    // numeric minimum, which would wrongly promote a free/solar-sponge window to
+    // apply all day. Fall back to the lowest rate only if no OFF_PEAK exists.
+    let defaultEntry = entries.find((e) => e.type === "OFF_PEAK");
+    if (!defaultEntry) defaultEntry = entries.reduce((a, b) => (b.rate < a.rate ? b : a));
+    touDefault = defaultEntry.rate;
+    // Emit every other period as an explicit window (including free 0c windows).
     for (const e of entries) {
-      if (e.rate <= touDefault) continue; // off-peak is covered by the default
+      if (e === defaultEntry) continue;
       for (const w of e.tou) {
         windows.push({
           label: prettyType(e.type), rate: e.rate,
@@ -163,18 +170,34 @@ export function normalizePlanDetail(detail) {
 
 /* ------------------------------ fetching -------------------------------- */
 
-async function fetchJson(url, versions = [3, 2, 1]) {
-  let lastErr;
-  for (const v of versions) {
-    try {
-      const res = await fetch(url, { headers: { "x-v": String(v), "Accept": "application/json" } });
-      if (res.status === 406) continue; // unsupported version; try another
-      if (!res.ok) { lastErr = new Error("HTTP " + res.status); continue; }
-      return await res.json();
-    } catch (e) { lastErr = e; }
-  }
-  throw lastErr || new Error("request failed");
+// Government CDR endpoints sit behind a WAF that rejects Node's native fetch
+// TLS fingerprint (403) but accepts curl, so we shell out to curl. Versions are
+// tried high-to-low so we get the richest schema the holder supports (this
+// app's normaliser targets the v3 tariff shape).
+function curlJson(url, versions = [3, 2, 1]) {
+  return new Promise((resolve, reject) => {
+    let lastErr = new Error("request failed");
+    const attempt = (i) => {
+      if (i >= versions.length) return reject(lastErr);
+      const v = versions[i];
+      execFile("curl", [
+        "-sS", "--max-time", "40", "--retry", "2", "--retry-delay", "1",
+        "-H", `x-v: ${v}`, "-H", "Accept: application/json",
+        "-w", "\n%{http_code}", url,
+      ], { maxBuffer: 128 * 1024 * 1024 }, (err, stdout) => {
+        if (err) { lastErr = err; return attempt(i + 1); }
+        const nl = stdout.lastIndexOf("\n");
+        const code = stdout.slice(nl + 1).trim();
+        const body = stdout.slice(0, nl);
+        if (code !== "200") { lastErr = new Error("HTTP " + code); return attempt(i + 1); }
+        try { resolve(JSON.parse(body)); }
+        catch (e) { lastErr = e; attempt(i + 1); }
+      });
+    };
+    attempt(0);
+  });
 }
+const fetchJson = curlJson;
 
 function isElectricityResidential(p) {
   const fuel = p.fuelType || "ELECTRICITY";
@@ -243,7 +266,15 @@ async function main() {
     if (allPlans.length >= MAX_PLANS) break;
   }
 
-  const plans = allPlans.slice(0, MAX_PLANS);
+  // De-duplicate by planId (alias endpoints / dual listings can repeat plans).
+  const seen = new Set();
+  const deduped = allPlans.filter((p) => {
+    const key = p.planId || JSON.stringify(p);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const plans = deduped.slice(0, MAX_PLANS);
   // Distinct distributor list for the front-end filter.
   const distributors = [...new Set(plans.flatMap((p) => p.distributors))].filter(Boolean).sort();
 

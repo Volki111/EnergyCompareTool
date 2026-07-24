@@ -30,7 +30,8 @@ jobs:
       - name: Fetch CDR plan data
         run: node scripts/fetch-plans.mjs
         env:
-          MAX_PLANS: "600"
+          MAX_PLANS: "900"
+          MAX_PER_RETAILER: "60"
 
       - name: Commit updated catalogue
         run: |

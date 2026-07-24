@@ -33,11 +33,15 @@ How it works (fully static, no backend at runtime):
 2. **`.github/workflows/update-plans.yml`** runs the script on a daily cron (and on demand from the Actions tab), then commits the refreshed **`data/plans.json`** back to the repo.
 3. The front-end loads `data/plans.json` and shows the **"Load a published plan"** picker in step 3. Your usage data still never leaves the browser.
 
+The committed `data/plans.json` currently holds ~580 real residential plans across all 14 major distribution networks (Ausgrid, Endeavour, Essential, Energex, Ergon, SA Power Networks, Citipower, Powercor, United Energy, AusNet, Jemena, Evoenergy…).
+
 Notes & limitations:
 
-- The seed `data/retailers.json` is a **starting point** — endpoints that don't resolve are skipped and logged; add or correct entries freely. The authoritative retailer list is on the [AER's site](https://www.aer.gov.au/energy-product-reference-data).
+- **Endpoint discovery:** `data/retailers.json` lists retailers hosted by the AER's Energy Made Easy (`https://cdr.energymadeeasy.gov.au/<code>`), which covers most majors. A handful of retailers (Red Energy, Alinta, Simply Energy, Aurora, OVO, Energy Locals, Sumo) publish from their own product base URI instead — add those to the seed once known. The authoritative list is on the [AER's site](https://www.aer.gov.au/energy-product-reference-data).
+- **HTTP client:** the government CDR endpoints sit behind a WAF that rejects Node's native `fetch` TLS fingerprint (403) but accepts `curl`, so the fetch script shells out to `curl` (present on GitHub runners).
+- The `MAX_PER_RETAILER` cap samples each retailer so the catalogue spans many brands/networks rather than exhausting one; raise it (and `MAX_PLANS`) for fuller coverage.
 - Covers National Energy Customer Framework states (NSW, QLD, SA, TAS, ACT). Victoria runs a separate scheme.
-- These are list/market rates for residential electricity — not personalised or negotiated discounts. Demand-charge and complex block tariffs aren't fully modelled and are skipped or simplified.
+- These are list/market rates for residential electricity — not personalised or negotiated discounts. Off-peak is chosen by the `OFF_PEAK` tariff type (so free/solar-sponge windows stay as windows, not the all-day default). Demand-charge and complex block tariffs aren't fully modelled and are skipped or simplified.
 - Run it locally with `node scripts/fetch-plans.mjs`; unit tests for the normaliser: `node scripts/test-normalize.mjs`.
 
 ## How costs are calculated
