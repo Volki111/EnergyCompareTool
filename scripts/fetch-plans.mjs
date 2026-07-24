@@ -181,7 +181,7 @@ function curlJson(url, versions = [3, 2, 1]) {
       if (i >= versions.length) return reject(lastErr);
       const v = versions[i];
       execFile("curl", [
-        "-sS", "--max-time", "40", "--retry", "2", "--retry-delay", "1",
+        "-sS", "--max-time", "20", "--retry", "1", "--retry-delay", "1",
         "-H", `x-v: ${v}`, "-H", "Accept: application/json",
         "-w", "\n%{http_code}", url,
       ], { maxBuffer: 128 * 1024 * 1024 }, (err, stdout) => {
@@ -219,6 +219,42 @@ async function listPlans(baseUri) {
   return out;
 }
 
+// Discover retailer product endpoints from the public CDR Register. For many
+// retailers the register's publicBaseUri IS the working product base (Energy
+// Made Easy-hosted brands and some self-hosters); the rest 404 and are dropped
+// by the pre-probe below.
+async function fetchRegisterEndpoints() {
+  try {
+    const json = await curlJson(
+      "https://api.cdr.gov.au/cdr-register/v1/energy/data-holders/brands/summary",
+      [2, 1]
+    );
+    return (json?.data || [])
+      .map((b) => ({ name: b.brandName, baseUri: (b.publicBaseUri || "").replace(/\/+$/, "") }))
+      .filter((b) => b.baseUri);
+  } catch (e) {
+    console.warn("Register discovery failed:", e.message || e);
+    return [];
+  }
+}
+
+// Fast, parallel liveness check: does this base serve residential electricity
+// plans? Returns totalRecords (0 if not usable).
+function probeBase(baseUri) {
+  return new Promise((resolve) => {
+    execFile("curl", [
+      "-sS", "--max-time", "8", "-H", "x-v: 1", "-o", "-", "-w", "\n%{http_code}",
+      `${baseUri}/cds-au/v1/energy/plans?page-size=1&type=ALL&fuelType=ELECTRICITY`,
+    ], { maxBuffer: 8 * 1024 * 1024 }, (err, out) => {
+      if (err) return resolve(0);
+      const nl = out.lastIndexOf("\n");
+      if (out.slice(nl + 1).trim() !== "200") return resolve(0);
+      try { resolve(JSON.parse(out.slice(0, nl))?.meta?.totalRecords || 0); }
+      catch { resolve(0); }
+    });
+  });
+}
+
 async function pool(items, size, worker) {
   const results = [];
   let i = 0;
@@ -239,8 +275,23 @@ async function main() {
   const MAX_PER_RETAILER = +(process.env.MAX_PER_RETAILER || 250);
 
   const retailers = JSON.parse(await readFile(RETAILERS_FILE, "utf8"));
-  const list = Array.isArray(retailers) ? retailers : retailers.retailers || [];
-  console.log(`Loaded ${list.length} retailer endpoints from ${RETAILERS_FILE}`);
+  const seed = Array.isArray(retailers) ? retailers : retailers.retailers || [];
+  console.log(`Loaded ${seed.length} seed endpoints from ${RETAILERS_FILE}`);
+
+  // Merge the curated seed with dynamic register discovery, de-duplicated by
+  // base URI. The seed carries the majors (AGL, Origin…) whose register entry
+  // points at a self-host URL that 404s; discovery adds everything else.
+  let candidates = seed.slice();
+  if (process.env.USE_REGISTER !== "0") {
+    const reg = await fetchRegisterEndpoints();
+    console.log(`Register returned ${reg.length} brand endpoints`);
+    const have = new Set(seed.map((s) => (s.baseUri || "").replace(/\/+$/, "")));
+    for (const r of reg) if (!have.has(r.baseUri)) { candidates.push(r); have.add(r.baseUri); }
+  }
+  console.log(`Pre-probing ${candidates.length} candidate endpoints…`);
+  const totals = await pool(candidates, 12, async (c) => probeBase((c.baseUri || "").replace(/\/+$/, "")));
+  const list = candidates.filter((_, i) => totals[i] > 0);
+  console.log(`${list.length} endpoints serve residential electricity plans.`);
 
   const allPlans = [];
   const report = [];

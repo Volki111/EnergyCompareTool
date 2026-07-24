@@ -29,15 +29,15 @@ Australian electricity retailers are required to publish their generally-availab
 
 How it works (fully static, no backend at runtime):
 
-1. **`scripts/fetch-plans.mjs`** reads a seed list of retailer endpoints (`data/retailers.json`), calls each retailer's `GET /cds-au/v1/energy/plans` and `…/plans/{id}` endpoints, and **normalises** the tariffs into this app's model. CDR prices are in *dollars*; the normaliser converts everything to cents, maps time-of-use windows (peak/shoulder/off-peak, days, times), and pulls in controlled-load and solar feed-in rates.
+1. **`scripts/fetch-plans.mjs`** discovers retailer endpoints two ways — a curated seed list (`data/retailers.json`, for the majors) **plus dynamic discovery from the public [CDR Register](https://api.cdr.gov.au/cdr-register/v1/energy/data-holders/brands/summary)** — pre-probes them all in parallel, then calls each live retailer's `GET /cds-au/v1/energy/plans` and `…/plans/{id}` endpoints and **normalises** the tariffs into this app's model. CDR prices are in *dollars*; the normaliser converts everything to cents, maps time-of-use windows (peak/shoulder/off-peak, days, times), and pulls in controlled-load and solar feed-in rates. Plans are de-duplicated by plan ID.
 2. **`.github/workflows/update-plans.yml`** runs the script on a daily cron (and on demand from the Actions tab), then commits the refreshed **`data/plans.json`** back to the repo.
 3. The front-end loads `data/plans.json` and shows the **"Load a published plan"** picker in step 3. Your usage data still never leaves the browser.
 
-The committed `data/plans.json` currently holds ~580 real residential plans across all 14 major distribution networks (Ausgrid, Endeavour, Essential, Energex, Ergon, SA Power Networks, Citipower, Powercor, United Energy, AusNet, Jemena, Evoenergy…).
+The committed `data/plans.json` currently holds ~930 real residential plans from ~26 retailers (AGL, Origin, EnergyAustralia, ENGIE, OVO, Amber, Powershop, Momentum, GloBird, Flow Power, Kogan, Lumo, Nectr, Tango, Dodo, Ergon, ActewAGL and more) across all 15 distribution networks (Ausgrid, Endeavour, Essential, Energex, Ergon, SA Power Networks, Citipower, Powercor, United Energy, AusNet, Jemena, Evoenergy, TasNetworks…).
 
 Notes & limitations:
 
-- **Endpoint discovery:** `data/retailers.json` lists retailers hosted by the AER's Energy Made Easy (`https://cdr.energymadeeasy.gov.au/<code>`), which covers most majors. A handful of retailers (Red Energy, Alinta, Simply Energy, Aurora, OVO, Energy Locals, Sumo) publish from their own product base URI instead — add those to the seed once known. The authoritative list is on the [AER's site](https://www.aer.gov.au/energy-product-reference-data).
+- **Endpoint discovery:** most retailers are auto-discovered from the CDR Register or hosted by the AER's Energy Made Easy (`https://cdr.energymadeeasy.gov.au/<code>`). A few (e.g. Red Energy, Alinta, Simply Energy, Aurora) publish from a self-hosted product base URI that isn't exposed in the register (the AER only lists these in a PDF) — add them to `data/retailers.json` once known. The authoritative list is on the [AER's site](https://www.aer.gov.au/energy-product-reference-data).
 - **HTTP client:** the government CDR endpoints sit behind a WAF that rejects Node's native `fetch` TLS fingerprint (403) but accepts `curl`, so the fetch script shells out to `curl` (present on GitHub runners).
 - The `MAX_PER_RETAILER` cap samples each retailer so the catalogue spans many brands/networks rather than exhausting one; raise it (and `MAX_PLANS`) for fuller coverage.
 - Covers National Energy Customer Framework states (NSW, QLD, SA, TAS, ACT). Victoria runs a separate scheme.
