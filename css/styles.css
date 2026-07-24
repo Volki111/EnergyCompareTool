@@ -208,6 +208,11 @@ input[type="number"] { -moz-appearance: textfield; }
 }
 .picker-row .btn { white-space: nowrap; }
 #catalog-meta { color: var(--text-dim); }
+.nmi-note {
+  margin: 0 0 14px; padding: 9px 12px; font-size: .86rem;
+  background: rgba(78,168,222,.12); border: 1px solid var(--accent-2);
+  border-radius: 8px; color: var(--text);
+}
 @media (max-width: 720px) { .picker-row { grid-template-columns: 1fr 1fr; } .picker-row .picker-plan, .picker-row .btn { grid-column: 1 / -1; } }
 
 /* Load-shifting / optimise */

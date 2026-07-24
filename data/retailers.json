@@ -15,6 +15,11 @@
     { "name": "Amber Electric", "baseUri": "https://cdr.energymadeeasy.gov.au/amber" },
     { "name": "Kogan Energy", "baseUri": "https://cdr.energymadeeasy.gov.au/kogan" },
     { "name": "Lumo Energy", "baseUri": "https://cdr.energymadeeasy.gov.au/lumo" },
-    { "name": "Ergon Energy", "baseUri": "https://cdr.energymadeeasy.gov.au/ergon" }
+    { "name": "Ergon Energy", "baseUri": "https://cdr.energymadeeasy.gov.au/ergon" },
+    { "name": "Red Energy", "baseUri": "https://cdr.energymadeeasy.gov.au/red-energy" },
+    { "name": "Alinta Energy", "baseUri": "https://cdr.energymadeeasy.gov.au/alinta" },
+    { "name": "Sumo", "baseUri": "https://cdr.energymadeeasy.gov.au/sumo-power" },
+    { "name": "Aurora Energy", "baseUri": "https://cdr.energymadeeasy.gov.au/aurora" },
+    { "name": "Diamond Energy", "baseUri": "https://cdr.energymadeeasy.gov.au/diamond" }
   ]
 }

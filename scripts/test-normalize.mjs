@@ -74,4 +74,14 @@ ok("demand-only skipped", demand === null);
 // Gas-only skipped
 ok("no electricity contract skipped", normalizePlanDetail({ gasContract: {} }) === null);
 
+// Implausible supply charge is rejected
+const absurd = normalizePlanDetail({
+  electricityContract: { tariffPeriod: [{ dailySupplyCharge: "13.72700", rateBlockUType: "singleRate", singleRate: { rates: [{ unitPrice: "0.30000" }] } }] },
+});
+ok("absurd supply rejected", absurd === null);
+// Absurd per-kWh rate rejected
+ok("absurd usage rate rejected", normalizePlanDetail({
+  electricityContract: { tariffPeriod: [{ dailySupplyCharge: "1.00000", rateBlockUType: "singleRate", singleRate: { rates: [{ unitPrice: "9.90000" }] } }] },
+}) === null);
+
 console.log(`\nAll ${pass} assertions passed.`);

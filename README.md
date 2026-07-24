@@ -22,6 +22,7 @@ A static, browser-only web app that helps you find the **cheapest electricity pl
 - **Load-shifting advisor** — for time-of-use plans, works out how much of your usage lands in expensive peak/shoulder periods, groups your spend by rate tier, and lets you drag a slider to estimate savings from moving flexible load (dishwasher, washing, dryer, pool pump, EV charging) to off-peak — with tips that name your plan's actual peak windows.
 - **Saved & portable plans** — plans are stored in your browser (`localStorage`) so they persist between visits, plus **Export/Import** to back them up as a JSON file or move them to another device.
 - **Load real published plans** — pre-fill rates straight from the government's open plan data (see below), filter by your network/distributor, then tweak.
+- **Automatic network detection** — your NMI (read from the uploaded file) is matched against the AEMO allocation table to identify your distribution network, and the plan picker is pre-filtered to plans valid in your area.
 
 ## Real plan data (Consumer Data Right)
 
@@ -37,7 +38,11 @@ The committed `data/plans.json` currently holds ~930 real residential plans from
 
 Notes & limitations:
 
-- **Endpoint discovery:** most retailers are auto-discovered from the CDR Register or hosted by the AER's Energy Made Easy (`https://cdr.energymadeeasy.gov.au/<code>`). A few (e.g. Red Energy, Alinta, Simply Energy, Aurora) publish from a self-hosted product base URI that isn't exposed in the register (the AER only lists these in a PDF) — add them to `data/retailers.json` once known. The authoritative list is on the [AER's site](https://www.aer.gov.au/energy-product-reference-data).
+- **Endpoint discovery** merges three sources, de-duplicated and pre-probed: the curated `data/retailers.json` seed, a [community-maintained endpoint list](https://github.com/jxeeno/energy-cdr-prd-endpoints) that exposes each brand's `productReferenceDataBaseUri`, and the official [CDR Register](https://api.cdr.gov.au/cdr-register/v1/energy/data-holders/brands/summary) as a fallback. Between them these reach the large majority of retailers including ones that were previously hard to find (Red Energy, Alinta, Sumo, Aurora, Diamond…).
+
+### Network detection (NMI → distributor)
+
+`data/nmi-networks.json` holds the AEMO NMI allocation patterns for the 13 distribution networks. On upload, the app reads the NMI from your file, matches it (the 11th digit is a checksum, so the 10-char core is tested too), identifies your distributor, and pre-filters the plan picker. Regenerate it from the upstream [`aemo` gem allocation table](https://github.com/jufemaiz/aemo) if allocations change.
 - **HTTP client:** the government CDR endpoints sit behind a WAF that rejects Node's native `fetch` TLS fingerprint (403) but accepts `curl`, so the fetch script shells out to `curl` (present on GitHub runners).
 - The `MAX_PER_RETAILER` cap samples each retailer so the catalogue spans many brands/networks rather than exhausting one; raise it (and `MAX_PLANS`) for fuller coverage.
 - Covers National Energy Customer Framework states (NSW, QLD, SA, TAS, ACT). Victoria runs a separate scheme.

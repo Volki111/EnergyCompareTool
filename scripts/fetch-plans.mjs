@@ -147,6 +147,14 @@ export function normalizePlanDetail(detail) {
     else if (sfit.tariffUType === "timeVaryingTariffs") feedin = toCents(sfit.timeVaryingTariffs?.[0]?.rates?.[0]?.unitPrice);
   }
 
+  // Reject implausible residential values — bad/misaligned data would silently
+  // skew comparisons. Bounds are generous vs real-world maxima (supply ~300c/day,
+  // usage ~80c/kWh).
+  const rateVals = [flat, touDefault, controlled, ...windows.map((w) => w.rate)].filter((v) => v !== null && v !== undefined);
+  if (supply !== null && (supply < 0 || supply > 500)) return null;
+  if (rateVals.some((v) => v < 0 || v > 250)) return null;
+  if (feedin !== null && (feedin < 0 || feedin > 150)) return null;
+
   const round = (x) => (x === null ? "" : Math.round(x * 100) / 100);
   return {
     source: "cdr",
@@ -219,10 +227,29 @@ async function listPlans(baseUri) {
   return out;
 }
 
-// Discover retailer product endpoints from the public CDR Register. For many
-// retailers the register's publicBaseUri IS the working product base (Energy
-// Made Easy-hosted brands and some self-hosters); the rest 404 and are dropped
-// by the pre-probe below.
+// Community-maintained reconstruction of the CDR Register that (unlike the
+// official register's publicBaseUri) exposes each brand's actual
+// productReferenceDataBaseUri — the correct base for the plans endpoints. This
+// is the most complete discovery source; the register is used as a fallback.
+const COMMUNITY_PRD_URL = process.env.COMMUNITY_PRD_URL ||
+  "https://raw.githubusercontent.com/jxeeno/energy-cdr-prd-endpoints/main/docs/energy-prd-endpoints.json";
+
+async function fetchCommunityEndpoints() {
+  try {
+    const json = await curlJson(COMMUNITY_PRD_URL, [1]);
+    const rows = Array.isArray(json) ? json : json?.data || [];
+    return rows
+      .map((b) => ({ name: b.brandName, baseUri: (b.productReferenceDataBaseUri || "").replace(/\/+$/, "") }))
+      .filter((b) => b.baseUri);
+  } catch (e) {
+    console.warn("Community endpoint list failed:", e.message || e);
+    return [];
+  }
+}
+
+// Fallback discovery from the official CDR Register. Its publicBaseUri is the
+// correct product base for Energy Made Easy-hosted brands but 404s for
+// self-hosters (dropped by the pre-probe).
 async function fetchRegisterEndpoints() {
   try {
     const json = await curlJson(
@@ -282,11 +309,15 @@ async function main() {
   // base URI. The seed carries the majors (AGL, Origin…) whose register entry
   // points at a self-host URL that 404s; discovery adds everything else.
   let candidates = seed.slice();
-  if (process.env.USE_REGISTER !== "0") {
+  const have = new Set(seed.map((s) => (s.baseUri || "").replace(/\/+$/, "")));
+  const addAll = (rows) => { for (const r of rows) if (r.baseUri && !have.has(r.baseUri)) { candidates.push(r); have.add(r.baseUri); } };
+  if (process.env.USE_DISCOVERY !== "0") {
+    const community = await fetchCommunityEndpoints();
+    console.log(`Community list returned ${community.length} product endpoints`);
+    addAll(community);
     const reg = await fetchRegisterEndpoints();
     console.log(`Register returned ${reg.length} brand endpoints`);
-    const have = new Set(seed.map((s) => (s.baseUri || "").replace(/\/+$/, "")));
-    for (const r of reg) if (!have.has(r.baseUri)) { candidates.push(r); have.add(r.baseUri); }
+    addAll(reg);
   }
   console.log(`Pre-probing ${candidates.length} candidate endpoints…`);
   const totals = await pool(candidates, 12, async (c) => probeBase((c.baseUri || "").replace(/\/+$/, "")));
@@ -338,7 +369,9 @@ async function main() {
     retailers: report,
     plans,
   };
-  await writeFile(OUT_FILE, JSON.stringify(output, null, 2) + "\n");
+  // Compact JSON — this file is fetched by the browser on every visit, so keep
+  // it small. (It's machine-generated; line-level diffs aren't meaningful.)
+  await writeFile(OUT_FILE, JSON.stringify(output) + "\n");
   console.log(`Wrote ${plans.length} plans (${distributors.length} distributors) to ${OUT_FILE}`);
 }
 

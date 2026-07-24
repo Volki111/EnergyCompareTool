@@ -29,6 +29,9 @@
   let costProfilePlanId = null; // plan selected in the usage-vs-cost chart
   let optPlanId = null;         // plan selected in the load-shift optimiser
   let optPct = 30;              // load-shift slider position
+  let nmiNetworks = null;       // AEMO NMI allocation table
+  let detectedNmi = null;       // NMI read from the uploaded file
+  let detectedNetwork = null;   // { name, region } matched from the NMI
 
   const STORAGE_KEY = "ect_plans_v1";
 
@@ -108,6 +111,7 @@
     const iRegisterRead = idx(["registerreadvalue"]);
     const iRateDesc = idx(["ratetypedescription", "ratetype", "description"]);
     const iRegCode = idx(["registercode", "register"]);
+    const iNmi = idx(["nmi"]);
 
     if (iStart === -1) throw new Error("Couldn't find a start-date/time column. Expected a column like 'StartDate'.");
     const iValue = iProfile !== -1 ? iProfile : iRegisterRead;
@@ -115,9 +119,11 @@
 
     const rows = [];
     let skipped = 0;
+    detectedNmi = null;
     for (let i = 1; i < lines.length; i++) {
       const c = splitCsvLine(lines[i]);
       if (c.length <= iValue) { skipped++; continue; }
+      if (!detectedNmi && iNmi !== -1 && c[iNmi]) detectedNmi = c[iNmi].trim();
       const start = parseDate(c[iStart]);
       const kwh = parseFloat(c[iValue]);
       if (!start || isNaN(kwh)) { skipped++; continue; }
@@ -968,6 +974,49 @@
 
   let catalog = null;
 
+  function loadNmiNetworks() {
+    fetch("data/nmi-networks.json")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && data.networks) { nmiNetworks = data.networks; if (detectedNmi && catalog) applyNmiDetection(); }
+      })
+      .catch(() => {});
+  }
+
+  // Identify the distribution network from an NMI using the AEMO allocation
+  // patterns. The 11th char is a checksum, so we test the 10-char core too.
+  function detectNetworkFromNmi(nmi) {
+    if (!nmiNetworks || !nmi) return null;
+    const candidates = [nmi.toUpperCase(), nmi.toUpperCase().slice(0, 10)];
+    for (const net of nmiNetworks) {
+      for (const pat of net.patterns) {
+        let re;
+        try { re = new RegExp("^(" + pat + ")$"); } catch (e) { continue; }
+        if (candidates.some((c) => re.test(c))) return { name: net.name, region: net.region };
+      }
+    }
+    return null;
+  }
+
+  // Map an AEMO network name to the distributor string used in the plan
+  // catalogue (names differ, e.g. "SP AusNet" vs "AusNet Services").
+  const NETWORK_ALIASES = {
+    "ausnet": "ausnet", "evoenergy": "evoenergy", "actewagl": "evoenergy",
+    "citipower": "citipower", "powercor": "powercor", "endeavour": "endeavour",
+    "ergon": "ergon", "energex": "energex", "ausgrid": "ausgrid",
+    "essential": "essential", "sa power": "sa power", "tasnetwork": "tasnetwork",
+    "jemena": "jemena", "united": "united",
+  };
+
+  function catalogDistributorFor(networkName) {
+    if (!networkName || !catalog) return null;
+    const key = networkName.toLowerCase();
+    let token = null;
+    for (const k in NETWORK_ALIASES) if (key.includes(k)) { token = NETWORK_ALIASES[k]; break; }
+    if (!token) return null;
+    return (catalog.distributors || []).find((d) => d.toLowerCase().includes(token)) || null;
+  }
+
   function loadCatalog() {
     fetch("data/plans.json")
       .then((r) => (r.ok ? r.json() : null))
@@ -989,10 +1038,29 @@
     const dist = $("#catalog-dist");
     dist.innerHTML = `<option value="">All networks</option>` +
       (catalog.distributors || []).map((d) => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join("");
-    dist.addEventListener("change", refreshCatalogPlans);
+    dist.addEventListener("change", () => { $("#catalog-nmi-note").hidden = true; refreshCatalogPlans(); });
     $("#catalog-search").addEventListener("input", refreshCatalogPlans);
     $("#catalog-add").addEventListener("click", addCatalogPlan);
     refreshCatalogPlans();
+    applyNmiDetection();
+  }
+
+  // After an upload, pre-select the catalogue distributor matching the NMI.
+  function applyNmiDetection() {
+    const noteEl = $("#catalog-nmi-note");
+    if (!noteEl || !catalog) return;
+    if (!detectedNmi) { noteEl.hidden = true; return; }
+    detectedNetwork = detectNetworkFromNmi(detectedNmi);
+    if (!detectedNetwork) { noteEl.hidden = true; return; }
+    const dist = catalogDistributorFor(detectedNetwork.name);
+    noteEl.hidden = false;
+    if (dist) {
+      $("#catalog-dist").value = dist;
+      refreshCatalogPlans();
+      noteEl.innerHTML = `Detected your network as <strong>${escapeHtml(detectedNetwork.name)}</strong> (${escapeHtml(detectedNetwork.region)}) from your NMI — filtered to <strong>${escapeHtml(dist)}</strong> plans. Change the dropdown if that's not right.`;
+    } else {
+      noteEl.innerHTML = `Detected your network as <strong>${escapeHtml(detectedNetwork.name)}</strong> (${escapeHtml(detectedNetwork.region)}) from your NMI.`;
+    }
   }
 
   function catalogMatches() {
@@ -1091,6 +1159,7 @@
       renderUsage();
       renderPlans();
       recompute();
+      applyNmiDetection();
       $("#step-usage").scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (err) {
       status.className = "status err";
@@ -1117,6 +1186,7 @@
   function init() {
     loadPlans();
     loadCatalog();
+    loadNmiNetworks();
 
     const dz = $("#dropzone"), input = $("#file-input");
     $("#browse-btn").addEventListener("click", () => input.click());

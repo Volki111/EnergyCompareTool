@@ -1,0 +1,123 @@
+{
+ "source": "AEMO NMI Allocation List",
+ "networks": [
+  {
+   "name": "Evoenergy",
+   "region": "ACT",
+   "patterns": [
+    "NGGG[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "7001\\d{6}"
+   ]
+  },
+  {
+   "name": "Essential Energy",
+   "region": "NSW",
+   "patterns": [
+    "NAAA[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "NBBB[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "NDDD[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "NFFF[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "4001\\d{6}",
+    "4508\\d{6}",
+    "4204\\d{6}",
+    "4407\\d{6}"
+   ]
+  },
+  {
+   "name": "Ausgrid",
+   "region": "NSW",
+   "patterns": [
+    "NCCC[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "410[234]\\d{6}"
+   ]
+  },
+  {
+   "name": "Endeavour Energy",
+   "region": "NSW",
+   "patterns": [
+    "NEEE[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "431\\d{7}"
+   ]
+  },
+  {
+   "name": "Ergon Energy",
+   "region": "QLD",
+   "patterns": [
+    "QAAA[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "QCCC[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "QDDD[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "QEEE[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "QFFF[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "QGGG[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "30\\d{8}"
+   ]
+  },
+  {
+   "name": "Energex",
+   "region": "QLD",
+   "patterns": [
+    "QB\\d{2}[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "31\\d{8}"
+   ]
+  },
+  {
+   "name": "SA Power Networks",
+   "region": "SA",
+   "patterns": [
+    "SAAA[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "SASMPL\\d{4}",
+    "200[12]\\d{6}"
+   ]
+  },
+  {
+   "name": "TasNetworks",
+   "region": "TAS",
+   "patterns": [
+    "T000000(([0-4]\\d{3})|(500[01]))",
+    "8000\\d{6}",
+    "8590[23]\\d{5}",
+    "T[A-HJ-NP-Z\\d]{3}W[A-HJ-NP-Z\\d]{5}"
+   ]
+  },
+  {
+   "name": "CitiPower",
+   "region": "VIC",
+   "patterns": [
+    "VAAA[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "610[23]\\d{6}"
+   ]
+  },
+  {
+   "name": "AusNet Services",
+   "region": "VIC",
+   "patterns": [
+    "VBBB[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "630[56]\\d{6}"
+   ]
+  },
+  {
+   "name": "Powercor",
+   "region": "VIC",
+   "patterns": [
+    "VCCC[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "620[34]\\d{6}"
+   ]
+  },
+  {
+   "name": "Jemena",
+   "region": "VIC",
+   "patterns": [
+    "VDDD[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "6001\\d{6}"
+   ]
+  },
+  {
+   "name": "United Energy",
+   "region": "VIC",
+   "patterns": [
+    "VEEE[A-HJ-NP-VX-Z\\d][A-HJ-NP-Z\\d]{5}",
+    "640[78]\\d{6}"
+   ]
+  }
+ ]
+}
