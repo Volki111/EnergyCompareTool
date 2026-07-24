@@ -23,6 +23,7 @@ A static, browser-only web app that helps you find the **cheapest electricity pl
 - **Saved & portable plans** — plans are stored in your browser (`localStorage`) so they persist between visits, plus **Export/Import** to back them up as a JSON file or move them to another device.
 - **Load real published plans** — pre-fill rates straight from the government's open plan data (see below), filter by your network/distributor, then tweak.
 - **Automatic network detection** — your NMI (read from the uploaded file) is matched against the AEMO allocation table to identify your distribution network, and the plan picker is pre-filtered to plans valid in your area.
+- **Postcode filter** — narrow the picker to plans actually available at your postcode (each plan carries its coverage area).
 
 ## Real plan data (Consumer Data Right)
 
@@ -43,6 +44,10 @@ Notes & limitations:
 ### Network detection (NMI → distributor)
 
 `data/nmi-networks.json` holds the AEMO NMI allocation patterns for the 13 distribution networks. On upload, the app reads the NMI from your file, matches it (the 11th digit is a checksum, so the 10-char core is tested too), identifies your distributor, and pre-filters the plan picker. Regenerate it from the upstream [`aemo` gem allocation table](https://github.com/jufemaiz/aemo) if allocations change.
+
+### Postcode coverage
+
+Each plan lists the postcodes it's available in. Since plans share a small number of distinct coverage areas (~23 across the whole catalogue), the sets are de-duplicated: `data/plans.json` stores each unique set once in `postcodeSets` and every plan references it by index (`pc`). This keeps the file ~700 KB instead of several megabytes. The fetcher samples plans per retailer **and per network** (`MAX_PER_NETWORK`) so every distribution area a retailer serves is represented.
 - **HTTP client:** the government CDR endpoints sit behind a WAF that rejects Node's native `fetch` TLS fingerprint (403) but accepts `curl`, so the fetch script shells out to `curl` (present on GitHub runners).
 - The `MAX_PER_RETAILER` cap samples each retailer so the catalogue spans many brands/networks rather than exhausting one; raise it (and `MAX_PLANS`) for fuller coverage.
 - Covers National Energy Customer Framework states (NSW, QLD, SA, TAS, ACT). Victoria runs a separate scheme.

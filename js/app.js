@@ -1040,6 +1040,10 @@
       (catalog.distributors || []).map((d) => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join("");
     dist.addEventListener("change", () => { $("#catalog-nmi-note").hidden = true; refreshCatalogPlans(); });
     $("#catalog-search").addEventListener("input", refreshCatalogPlans);
+    $("#catalog-postcode").addEventListener("input", (e) => {
+      e.target.value = e.target.value.replace(/\D/g, "").slice(0, 4);
+      refreshCatalogPlans();
+    });
     $("#catalog-add").addEventListener("click", addCatalogPlan);
     refreshCatalogPlans();
     applyNmiDetection();
@@ -1066,8 +1070,14 @@
   function catalogMatches() {
     const d = $("#catalog-dist").value;
     const q = $("#catalog-search").value.trim().toLowerCase();
+    const pc = ($("#catalog-postcode").value || "").trim();
+    const pcActive = /^\d{4}$/.test(pc) && catalog.postcodeSets;
     return catalog.plans.filter((p) => {
       if (d && !(p.distributors || []).includes(d)) return false;
+      if (pcActive) {
+        const set = p.pc != null ? catalog.postcodeSets[p.pc] : null;
+        if (!set || !set.includes(pc)) return false;
+      }
       if (q) {
         const hay = ((p.brand || "") + " " + (p.name || "") + " " + (p.retailer || "")).toLowerCase();
         if (!hay.includes(q)) return false;

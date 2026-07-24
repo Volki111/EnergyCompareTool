@@ -164,6 +164,8 @@ export function normalizePlanDetail(detail) {
     fuelType: detail.fuelType || "ELECTRICITY",
     customerType: detail.customerType || "RESIDENTIAL",
     distributors: (detail.geography?.distributors) || [],
+    // Raw postcode coverage; de-duplicated into shared sets at write time.
+    _postcodes: (detail.geography?.includedPostcodes) || [],
     applicationUri: detail.applicationUri || "",
     supply: round(supply),
     controlled: round(controlled),
@@ -300,6 +302,7 @@ async function main() {
   const OUT_FILE = process.env.OUT_FILE || "data/plans.json";
   const MAX_PLANS = +(process.env.MAX_PLANS || 600);
   const MAX_PER_RETAILER = +(process.env.MAX_PER_RETAILER || 250);
+  const MAX_PER_NETWORK = +(process.env.MAX_PER_NETWORK || 8);
 
   const retailers = JSON.parse(await readFile(RETAILERS_FILE, "utf8"));
   const seed = Array.isArray(retailers) ? retailers : retailers.retailers || [];
@@ -331,7 +334,19 @@ async function main() {
     if (!base) continue;
     try {
       const metas = await listPlans(base);
-      const capped = metas.slice(0, MAX_PER_RETAILER);
+      // Network-aware sampling: cap plans per (retailer × network) so every
+      // distribution area a retailer serves is represented, instead of taking
+      // the first N (which skews to whichever networks list first).
+      const perNet = new Map();
+      const capped = [];
+      for (const p of metas) {
+        const net = (p.geography?.distributors || ["?"])[0];
+        const n = perNet.get(net) || 0;
+        if (n >= MAX_PER_NETWORK) continue;
+        perNet.set(net, n + 1);
+        capped.push(p);
+        if (capped.length >= MAX_PER_RETAILER) break;
+      }
       const details = await pool(capped, 6, async (p) => {
         const json = await fetchJson(`${base}/cds-au/v1/energy/plans/${encodeURIComponent(p.planId)}`, [3, 2, 1]);
         return normalizePlanDetail(json?.data);
@@ -360,12 +375,27 @@ async function main() {
   // Distinct distributor list for the front-end filter.
   const distributors = [...new Set(plans.flatMap((p) => p.distributors))].filter(Boolean).sort();
 
+  // De-duplicate postcode coverage: plans share a small number of distinct sets,
+  // so store each set once and reference it by index (keeps the file small).
+  const setIndex = new Map();
+  const postcodeSets = [];
+  for (const p of plans) {
+    const pc = [...new Set(p._postcodes || [])].sort();
+    delete p._postcodes;
+    if (!pc.length) { p.pc = null; continue; }
+    const sig = pc.join(",");
+    let idx = setIndex.get(sig);
+    if (idx === undefined) { idx = postcodeSets.length; postcodeSets.push(pc); setIndex.set(sig, idx); }
+    p.pc = idx;
+  }
+
   const output = {
     generatedAt: new Date().toISOString(),
     source: "Australian CDR energy Product Reference Data",
     disclaimer: "List/market rates for residential electricity, GST-inclusive figures may vary. Estimates only — always confirm on the retailer's site.",
     planCount: plans.length,
     distributors,
+    postcodeSets,
     retailers: report,
     plans,
   };

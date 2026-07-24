@@ -200,7 +200,7 @@ input[type="number"] { -moz-appearance: textfield; }
 }
 .catalog-picker h3 { margin: 0 0 4px; font-size: 1.05rem; }
 .catalog-picker .chart-note { margin: 0 0 14px; }
-.picker-row { display: grid; grid-template-columns: 1.1fr 1.1fr 1.6fr auto; gap: 12px; align-items: end; }
+.picker-row { display: grid; grid-template-columns: 1.1fr 0.6fr 1.1fr 1.5fr auto; gap: 12px; align-items: end; }
 .picker-row .field { margin: 0; }
 .picker-row select, .picker-row input {
   background: var(--bg-card); border: 1px solid var(--border); color: var(--text);
