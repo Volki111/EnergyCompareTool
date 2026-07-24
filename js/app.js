@@ -20,7 +20,15 @@
   let plans = [];        // user plans
   let profileChart = null;
   let compareChart = null;
+  let breakdownChart = null;
+  let monthlyChart = null;
+  let costProfileChart = null;
+  let tierChart = null;
   let planSeq = 0;
+  let lastResults = [];       // most recent [{plan, cost}] sorted cheapest-first
+  let costProfilePlanId = null; // plan selected in the usage-vs-cost chart
+  let optPlanId = null;         // plan selected in the load-shift optimiser
+  let optPct = 30;              // load-shift slider position
 
   const STORAGE_KEY = "ect_plans_v1";
 
@@ -515,15 +523,19 @@
 
     if (!usable.length) {
       resultsSection.hidden = false;
+      $("#step-optimize").hidden = true;
       $("#verdict").className = "verdict none";
       $("#verdict").innerHTML = "<p>Enter rates for at least one plan above to see the comparison.</p>";
       $("#results-table-wrap").innerHTML = "";
-      if (compareChart) { compareChart.destroy(); compareChart = null; }
+      lastResults = [];
+      [compareChart, breakdownChart, monthlyChart, costProfileChart].forEach((c) => c && c.destroy());
+      compareChart = breakdownChart = monthlyChart = costProfileChart = null;
       return;
     }
 
     const results = usable.map((p) => ({ plan: p, cost: costForPlan(p, intervals, usageStats) }));
     results.sort((a, b) => a.cost.perYear - b.cost.perYear);
+    lastResults = results;
     const cheapest = results[0], dearest = results[results.length - 1];
 
     resultsSection.hidden = false;
@@ -533,13 +545,19 @@
       v.innerHTML = `<h3>${escapeHtml(cheapest.plan.name)}</h3><p>Estimated <span class="save">${money(cheapest.cost.perYear)}/year</span> (${money(cheapest.cost.perDay)}/day) for your usage. Add another plan to compare.</p>`;
     } else {
       const saving = dearest.cost.perYear - cheapest.cost.perYear;
-      v.innerHTML = `<h3>🏆 ${escapeHtml(cheapest.plan.name)} is cheapest</h3>
+      v.innerHTML = `<h3>${escapeHtml(cheapest.plan.name)} is cheapest</h3>
         <p>Estimated <span class="save">${money(cheapest.cost.perYear)}/year</span> — that's <span class="save">${money(saving)}/year cheaper</span> than the most expensive option (${escapeHtml(dearest.plan.name)}).</p>`;
     }
 
     renderResultsTable(results, cheapest);
     renderCompareChart(results, cheapest);
+    safe(() => renderBreakdownChart(results));
+    safe(() => renderMonthlyChart(results));
+    safe(renderCostProfile);
+    safe(renderOptimize);
   }
+
+  const annualFactor = () => 365 / usageStats.nDays;
 
   function renderResultsTable(results, cheapest) {
     let html = `<table class="results"><thead><tr>
@@ -590,6 +608,335 @@
     });
   }
 
+  /* ---- Cost breakdown (stacked components) ---- */
+  function renderBreakdownChart(results) {
+    if (!hasChart()) return;
+    const f = annualFactor();
+    const ds = [
+      { label: "General usage", key: "usage", color: "#ffb703", sign: 1 },
+      { label: "Controlled load", key: "controlled", color: "#4ea8de", sign: 1 },
+      { label: "Supply charge", key: "supply", color: "#9b8cff", sign: 1 },
+      { label: "Solar credit", key: "feedin", color: "#52b788", sign: -1 },
+    ].map((d) => ({
+      label: d.label,
+      data: results.map((r) => +(r.cost[d.key] * f * d.sign).toFixed(2)),
+      backgroundColor: d.color,
+      borderRadius: 4,
+      stack: "cost",
+    }));
+    if (breakdownChart) breakdownChart.destroy();
+    breakdownChart = new Chart($("#breakdown-chart"), {
+      type: "bar",
+      data: { labels: results.map((r) => r.plan.name), datasets: ds },
+      options: (function () {
+        const o = chartOpts("$ per year", "");
+        o.plugins.tooltip = { callbacks: { label: (c) => c.dataset.label + ": " + money(c.parsed.y) } };
+        o.scales.x.stacked = true; o.scales.y.stacked = true;
+        o.scales.y.ticks.callback = (v) => "$" + v;
+        return { responsive: true, plugins: o.plugins, scales: o.scales };
+      })(),
+    });
+  }
+
+  /* ---- Cost by month, per plan ---- */
+  function monthlyCostSeries(plan) {
+    // Group intervals by calendar month; supply charge uses distinct days per month.
+    const disc = 1 - num(plan.discount) / 100;
+    const map = new Map(); // ym -> {usage, controlled, feedin, days:Set}
+    for (const r of intervals) {
+      const d = r.start;
+      const ym = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+      let m = map.get(ym);
+      if (!m) { m = { usage: 0, controlled: 0, feedin: 0, days: new Set() }; map.set(ym, m); }
+      m.days.add(d.getDate());
+      if (r.kwh < 0) { m.feedin += -r.kwh * num(plan.feedin); continue; }
+      const rate = rateForInterval(plan, r);
+      if (r.register === "controlled") m.controlled += r.kwh * rate;
+      else m.usage += r.kwh * rate;
+    }
+    return [...map.keys()].sort().map((ym) => {
+      const m = map.get(ym);
+      const cents = (m.usage + m.controlled) * disc + m.days.size * num(plan.supply) - m.feedin;
+      return { ym, cost: cents / 100 };
+    });
+  }
+
+  function renderMonthlyChart(results) {
+    if (!hasChart()) return;
+    const palette = ["#ffb703", "#4ea8de", "#52b788", "#e07a5f", "#9b8cff", "#f4a261", "#2a9d8f", "#e76f51"];
+    const seriesList = results.map((r) => monthlyCostSeries(r.plan));
+    const labels = [...new Set(seriesList.flat().map((p) => p.ym))].sort();
+    const fmtMonth = (ym) => {
+      const [y, mo] = ym.split("-");
+      return new Date(y, mo - 1, 1).toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+    };
+    const datasets = results.map((r, i) => {
+      const byYm = Object.fromEntries(seriesList[i].map((p) => [p.ym, p.cost]));
+      return {
+        label: r.plan.name,
+        data: labels.map((ym) => (ym in byYm ? +byYm[ym].toFixed(2) : null)),
+        borderColor: palette[i % palette.length],
+        backgroundColor: palette[i % palette.length],
+        tension: .3, pointRadius: 2, borderWidth: 2, spanGaps: true,
+      };
+    });
+    if (monthlyChart) monthlyChart.destroy();
+    monthlyChart = new Chart($("#monthly-chart"), {
+      type: "line",
+      data: { labels: labels.map(fmtMonth), datasets },
+      options: (function () {
+        const o = chartOpts("$ per month", "");
+        o.plugins.tooltip = { callbacks: { label: (c) => c.dataset.label + ": " + money(c.parsed.y) } };
+        o.scales.y.ticks.callback = (v) => "$" + v;
+        return { responsive: true, interaction: { mode: "index", intersect: false }, plugins: o.plugins, scales: o.scales };
+      })(),
+    });
+  }
+
+  /* ---- Usage vs cost by time of day, for a selected plan ---- */
+  function costProfileFor(plan) {
+    // Average $ spent and kWh used per half-hour slot across an average day.
+    const disc = 1 - num(plan.discount) / 100;
+    const cost = new Array(48).fill(0);   // cents summed
+    const kwh = new Array(48).fill(0);
+    for (const r of intervals) {
+      if (r.kwh < 0) continue;
+      const d = r.start;
+      const slot = d.getHours() * 2 + (d.getMinutes() >= 30 ? 1 : 0);
+      const rate = rateForInterval(plan, r);
+      cost[slot] += r.kwh * rate * disc;
+      kwh[slot] += r.kwh;
+    }
+    const n = usageStats.nDays;
+    return { cost: cost.map((c) => c / 100 / n), kwh: kwh.map((k) => k / n) };
+  }
+
+  function populateSelect(sel, results, current) {
+    const ids = results.map((r) => r.plan.id);
+    const chosen = ids.includes(current) ? current : ids[0];
+    sel.innerHTML = results
+      .map((r) => `<option value="${r.plan.id}"${r.plan.id === chosen ? " selected" : ""}>${escapeHtml(r.plan.name || "Unnamed plan")}</option>`)
+      .join("");
+    return chosen;
+  }
+
+  function renderCostProfile() {
+    if (!hasChart() || !lastResults.length) return;
+    costProfilePlanId = populateSelect($("#profile-plan"), lastResults, costProfilePlanId);
+    const res = lastResults.find((r) => r.plan.id === costProfilePlanId);
+    if (!res) return;
+    const prof = costProfileFor(res.plan);
+    const labels = Array.from({ length: 48 }, (_, i) => {
+      const h = Math.floor(i / 2), m = i % 2 ? "30" : "00";
+      return (h % 3 === 0 && m === "00") ? `${String(h).padStart(2, "0")}:00` : "";
+    });
+    if (costProfileChart) costProfileChart.destroy();
+    const dim = getComputedStyle(document.body).getPropertyValue("--text-dim").trim() || "#888";
+    costProfileChart = new Chart($("#cost-profile-chart"), {
+      data: {
+        labels,
+        datasets: [
+          {
+            type: "bar", label: "Cost (¢/half-hour)", yAxisID: "yCost",
+            data: prof.cost.map((c) => +(c * 100).toFixed(2)),
+            backgroundColor: "rgba(224,122,95,.65)", borderRadius: 2,
+          },
+          {
+            type: "line", label: "Usage (kWh)", yAxisID: "yKwh",
+            data: prof.kwh.map((k) => +k.toFixed(3)),
+            borderColor: "#4ea8de", backgroundColor: "rgba(78,168,222,.1)",
+            tension: .3, pointRadius: 0, borderWidth: 2, fill: true,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { labels: { color: dim } },
+          tooltip: { callbacks: { label: (c) => c.dataset.label + ": " + (c.dataset.yAxisID === "yCost" ? c.parsed.y + "¢" : c.parsed.y + " kWh") } },
+        },
+        scales: {
+          x: { ticks: { color: dim, maxRotation: 0, autoSkip: true }, grid: { color: "rgba(128,128,128,.12)" } },
+          yCost: { position: "left", title: { display: true, text: "¢ per half-hour", color: dim }, ticks: { color: dim, callback: (v) => v + "¢" }, grid: { color: "rgba(128,128,128,.12)" }, beginAtZero: true },
+          yKwh: { position: "right", title: { display: true, text: "kWh", color: dim }, ticks: { color: dim }, grid: { drawOnChartArea: false }, beginAtZero: true },
+        },
+      },
+    });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Load-shifting optimiser                                             */
+  /* ------------------------------------------------------------------ */
+
+  const DAY_ABBR = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  function daysLabel(days) {
+    if (!days || !days.length) return "every day";
+    const set = [...days].sort();
+    const weekdays = [1, 2, 3, 4, 5], weekend = [0, 6];
+    const eq = (a, b) => a.length === b.length && a.every((v) => b.includes(v));
+    if (eq(set, [0, 1, 2, 3, 4, 5, 6])) return "every day";
+    if (eq(set, weekdays)) return "weekdays";
+    if (eq(set, weekend)) return "weekends";
+    return set.map((d) => DAY_ABBR[d]).join(", ");
+  }
+  function fmtTime(t) {
+    const [h, m] = t.split(":").map(Number);
+    const ap = h >= 12 ? "pm" : "am";
+    let hr = h % 12; if (hr === 0) hr = 12;
+    return m ? `${hr}:${String(m).padStart(2, "0")}${ap}` : `${hr}${ap}`;
+  }
+
+  // Analyse a plan's general-usage cost by rate tier and the saving available
+  // from shifting higher-rate usage down to the plan's cheapest rate.
+  function shiftPotential(plan) {
+    const disc = 1 - num(plan.discount) / 100;
+    const f = annualFactor();
+    const byRate = new Map(); // rate -> kwh (period totals)
+    for (const r of intervals) {
+      if (r.kwh < 0 || r.register === "controlled") continue;
+      const rate = rateForInterval(plan, r);
+      byRate.set(rate, (byRate.get(rate) || 0) + r.kwh);
+    }
+    if (!byRate.size) return null;
+    const rates = [...byRate.keys()];
+    const targetRate = Math.min(...rates);
+
+    let peakKwh = 0, maxSavingCents = 0;
+    const tiers = [];
+    for (const [rate, kwh] of byRate) {
+      tiers.push({
+        rate,
+        kwhAnnual: kwh * f,
+        costAnnual: (kwh * rate * disc / 100) * f,
+        isTarget: rate === targetRate,
+        label: tierLabel(plan, rate, targetRate),
+      });
+      if (rate > targetRate) {
+        peakKwh += kwh;
+        maxSavingCents += kwh * (rate - targetRate) * disc;
+      }
+    }
+    tiers.sort((a, b) => b.rate - a.rate);
+
+    const windowsAbove = (plan.windows || [])
+      .filter((w) => num(w.rate) > targetRate)
+      .map((w) => ({ label: w.label || "Peak", rate: num(w.rate), from: w.from, to: w.to, days: w.days }))
+      .sort((a, b) => b.rate - a.rate);
+
+    return {
+      targetRate,
+      peakKwhAnnual: peakKwh * f,
+      maxSavingAnnual: (maxSavingCents / 100) * f,
+      baselineAnnual: costForPlan(plan, intervals, usageStats).perYear,
+      tiers,
+      windowsAbove,
+    };
+  }
+
+  function tierLabel(plan, rate, targetRate) {
+    if (rate === targetRate) {
+      const w = (plan.windows || []).find((x) => num(x.rate) === rate);
+      return (w && w.label) ? w.label + " (cheapest)" : "Off-peak / default";
+    }
+    const w = (plan.windows || []).find((x) => num(x.rate) === rate);
+    return (w && w.label) ? w.label : "Rate " + rate + "¢";
+  }
+
+  function renderOptimize() {
+    const section = $("#step-optimize");
+    // Candidates: plans where shifting actually helps (peak premium exists).
+    const candidates = lastResults
+      .map((r) => ({ plan: r.plan, pot: shiftPotential(r.plan) }))
+      .filter((c) => c.pot && c.pot.maxSavingAnnual > 1);
+
+    if (!candidates.length) { section.hidden = true; return; }
+    section.hidden = false;
+
+    const sel = $("#opt-plan");
+    const ids = candidates.map((c) => c.plan.id);
+    if (!ids.includes(optPlanId)) optPlanId = ids[0];
+    sel.innerHTML = candidates
+      .map((c) => `<option value="${c.plan.id}"${c.plan.id === optPlanId ? " selected" : ""}>${escapeHtml(c.plan.name || "Unnamed plan")}</option>`)
+      .join("");
+
+    renderOptDetail();
+  }
+
+  function renderOptDetail() {
+    const plan = plans.find((p) => p.id === optPlanId);
+    if (!plan) return;
+    const pot = shiftPotential(plan);
+    if (!pot) return;
+
+    $("#opt-summary").className = "opt-summary";
+    $("#opt-summary").innerHTML = [
+      ["Current estimate", money(pot.baselineAnnual) + "/yr", ""],
+      ["Peak / shoulder usage", fmt(pot.peakKwhAnnual, 0) + " kWh/yr", "above the cheapest rate"],
+      ["Cheapest rate available", pot.targetRate + "¢/kWh", "your off-peak target"],
+      ["Max possible saving", money(pot.maxSavingAnnual) + "/yr", "if all of it shifted", true],
+    ].map(([lbl, n, sub, accent]) =>
+      `<div class="stat"><div class="num${accent ? " accent" : ""}">${n}</div><div class="lbl">${lbl}</div><div class="lbl">${sub}</div></div>`
+    ).join("");
+
+    // Slider result
+    const range = $("#opt-range");
+    optPct = +range.value;
+    $("#opt-pct").textContent = optPct;
+    const saved = pot.maxSavingAnnual * (optPct / 100);
+    const projected = pot.baselineAnnual - saved;
+    $("#opt-result").innerHTML =
+      `Shifting <strong>${optPct}%</strong> of your peak &amp; shoulder usage to off-peak could bring this plan to ` +
+      `<span class="from">${money(pot.baselineAnnual)}</span> <span class="big">${money(projected)}/yr</span> ` +
+      `— saving about <strong>${money(saved)}/yr</strong>.`;
+
+    renderTierChart(pot);
+    renderOptTips(pot, saved);
+  }
+
+  function renderTierChart(pot) {
+    if (!hasChart()) return;
+    if (tierChart) tierChart.destroy();
+    const dim = getComputedStyle(document.body).getPropertyValue("--text-dim").trim() || "#888";
+    tierChart = new Chart($("#tier-chart"), {
+      type: "bar",
+      data: {
+        labels: pot.tiers.map((t) => `${t.label} (${t.rate}¢)`),
+        datasets: [{
+          label: "Annual cost",
+          data: pot.tiers.map((t) => +t.costAnnual.toFixed(2)),
+          backgroundColor: pot.tiers.map((t) => (t.isTarget ? "#52b788" : "#e07a5f")),
+          borderRadius: 4,
+        }],
+      },
+      options: {
+        responsive: true, indexAxis: "y",
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (c) => money(c.parsed.x) + "/yr  ·  " + fmt(pot.tiers[c.dataIndex].kwhAnnual, 0) + " kWh" } },
+        },
+        scales: {
+          x: { ticks: { color: dim, callback: (v) => "$" + v }, grid: { color: "rgba(128,128,128,.12)" }, beginAtZero: true },
+          y: { ticks: { color: dim }, grid: { display: false } },
+        },
+      },
+    });
+  }
+
+  function renderOptTips(pot, saved) {
+    const tips = [];
+    if (pot.windowsAbove.length) {
+      const list = pot.windowsAbove
+        .map((w) => `<strong>${escapeHtml(w.label)}</strong> — ${daysLabel(w.days)} ${fmtTime(w.from)}–${fmtTime(w.to)} at ${w.rate}¢/kWh`)
+        .join("</li><li>");
+      tips.push(`Your expensive periods on this plan:<ul><li>${list}</li></ul>`);
+    }
+    tips.push(`Run high-draw appliances outside those windows — <strong>dishwasher, washing machine, clothes dryer, pool pump, and EV or battery charging</strong> are the easiest to reschedule. A timer or delay-start does most of the work.`);
+    tips.push(`Every 1 kWh moved from a peak period to the ${pot.targetRate}¢ off-peak rate saves the gap between the two rates. Your realistic target is shifting flexible loads; fixed loads like lighting and cooking are harder to move.`);
+    if (saved > 0) tips.push(`At the slider setting above, that's roughly <strong>${money(saved)}/year</strong> back in your pocket — before even switching plans.`);
+    $("#opt-tips").innerHTML = "<h3>How to capture it</h3><ul><li>" + tips.join("</li><li>") + "</li></ul>";
+  }
+
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
@@ -613,6 +960,38 @@
       plans = [newPlan(false)];
       plans[0].name = "My current plan";
     }
+  }
+
+  function exportPlans() {
+    const data = JSON.stringify({ app: "energy-compare-tool", version: 1, plans }, null, 2);
+    const blob = new Blob([data], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "energy-compare-plans.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function importPlansFromText(text) {
+    let parsed;
+    try { parsed = JSON.parse(text); } catch (e) { alert("That file isn't valid JSON."); return; }
+    const incoming = Array.isArray(parsed) ? parsed : parsed.plans;
+    if (!Array.isArray(incoming) || !incoming.length) { alert("No plans found in that file."); return; }
+    // Re-key ids so they stay unique in this session.
+    plans = incoming.map((p) => ({
+      id: ++planSeq,
+      name: p.name || "Imported plan",
+      supply: p.supply ?? "", controlled: p.controlled ?? "", feedin: p.feedin ?? "", discount: p.discount ?? "",
+      mode: p.mode === "tou" ? "tou" : "flat",
+      flat: p.flat ?? "", touDefault: p.touDefault ?? "",
+      windows: Array.isArray(p.windows) ? p.windows.map((w) => ({
+        label: w.label || "", rate: w.rate ?? "",
+        days: Array.isArray(w.days) ? w.days.map(Number) : [1, 2, 3, 4, 5],
+        from: w.from || "00:00", to: w.to || "00:00",
+      })) : [],
+    }));
+    renderPlans(); savePlans(); recompute();
   }
 
   /* ------------------------------------------------------------------ */
@@ -689,6 +1068,26 @@
       plans[0].name = "My current plan";
       renderPlans(); savePlans(); recompute();
     });
+
+    $("#export-plans").addEventListener("click", exportPlans);
+    $("#import-plans").addEventListener("click", () => $("#import-input").click());
+    $("#import-input").addEventListener("change", (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => importPlansFromText(ev.target.result);
+      reader.readAsText(f);
+      e.target.value = "";
+    });
+
+    // Chart / optimiser selectors
+    $("#profile-plan").addEventListener("change", (e) => {
+      costProfilePlanId = +e.target.value; renderCostProfile();
+    });
+    $("#opt-plan").addEventListener("change", (e) => {
+      optPlanId = +e.target.value; renderOptDetail();
+    });
+    $("#opt-range").addEventListener("input", renderOptDetail);
   }
 
   document.addEventListener("DOMContentLoaded", init);

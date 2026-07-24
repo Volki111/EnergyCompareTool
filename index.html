@@ -6,14 +6,14 @@
   <title>Energy Compare Tool — Find your cheapest electricity plan</title>
   <meta name="description" content="Upload your electricity usage data and compare time-of-use plans to find the cheapest. Runs entirely in your browser — your data never leaves your device." />
   <link rel="stylesheet" href="css/styles.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><path d='M56 6 L24 56 H46 L40 94 L76 40 H52 Z' fill='%23ffb703'/></svg>" />
 </head>
 <body>
   <header class="site-header">
     <div class="wrap">
-      <h1>⚡ Energy Compare Tool</h1>
+      <h1>Energy Compare Tool</h1>
       <p class="tagline">Upload your electricity usage, enter some plans, and see what's actually cheapest — for <em>your</em> usage.</p>
-      <p class="privacy">🔒 Everything runs in your browser. Your usage data is never uploaded anywhere.</p>
+      <p class="privacy">Everything runs in your browser. Your usage data is never uploaded anywhere.</p>
     </div>
   </header>
 
@@ -62,8 +62,12 @@
       <div class="plan-actions">
         <button type="button" id="add-plan" class="btn">+ Add a plan</button>
         <button type="button" id="add-plan-tou" class="btn btn-ghost">+ Add a time-of-use plan</button>
+        <button type="button" id="export-plans" class="btn btn-ghost">Export plans</button>
+        <button type="button" id="import-plans" class="btn btn-ghost">Import plans</button>
         <button type="button" id="clear-plans" class="btn btn-ghost btn-danger">Clear all plans</button>
+        <input type="file" id="import-input" accept=".json,application/json" hidden />
       </div>
+      <p class="saved-note">Your plans are saved automatically in this browser, so they'll still be here next time. Use <strong>Export</strong> to back them up or move them to another device.</p>
     </section>
 
     <!-- STEP 4: RESULTS -->
@@ -78,7 +82,66 @@
         </div>
       </div>
       <div id="results-table-wrap" class="table-wrap"></div>
+
+      <div class="chart-row">
+        <div class="chart-box">
+          <div class="chart-head">
+            <div>
+              <h3>Daily usage vs cost</h3>
+              <p class="chart-note">Your average day: bars show how much you <em>spend</em> each half-hour on the selected plan (left axis), the line shows how much energy you <em>use</em> (right axis). Tall bars over cheap-energy times are where a plan stings.</p>
+            </div>
+            <label class="inline-select">Plan
+              <select id="profile-plan"></select>
+            </label>
+          </div>
+          <canvas id="cost-profile-chart"></canvas>
+        </div>
+      </div>
+
+      <div class="chart-row two-col">
+        <div class="chart-box">
+          <h3>What makes up each bill</h3>
+          <p class="chart-note">Annual cost split into general usage, controlled load and daily supply charge (solar credit subtracted).</p>
+          <canvas id="breakdown-chart"></canvas>
+        </div>
+        <div class="chart-box">
+          <h3>Estimated cost by month</h3>
+          <p class="chart-note">How each plan tracks across the months in your data — handy for spotting seasonal swings.</p>
+          <canvas id="monthly-chart"></canvas>
+        </div>
+      </div>
       <p class="disclaimer">Estimates only. Real bills vary with rounding, seasonal usage, GST, connection fees, membership discounts, demand charges and solar export. Always check the plan's full terms.</p>
+    </section>
+
+    <!-- STEP 5: LOAD SHIFTING -->
+    <section id="step-optimize" class="card" hidden>
+      <h2><span class="step">5</span> Can you make it cheaper? Shift your load</h2>
+      <p class="section-intro">Time-of-use plans reward you for using power when it's cheap. This looks at how much of your usage lands in expensive peak/shoulder periods, and estimates what you'd save by moving some of that to off-peak — for example running the dishwasher, washing machine, dryer, pool pump or EV charger overnight.</p>
+
+      <div class="opt-controls">
+        <label class="field">
+          <span>Plan to optimise</span>
+          <select id="opt-plan"></select>
+        </label>
+      </div>
+
+      <div id="opt-summary" class="opt-summary"></div>
+
+      <div class="opt-slider-wrap">
+        <label for="opt-range">Shift <output id="opt-pct">30</output>% of peak &amp; shoulder usage to off-peak</label>
+        <input type="range" id="opt-range" min="0" max="100" value="30" step="5" />
+        <div id="opt-result" class="opt-result"></div>
+      </div>
+
+      <div class="chart-row">
+        <div class="chart-box">
+          <h3>Where your money goes, by rate period</h3>
+          <p class="chart-note">Annual general-usage cost grouped by the rate that applies. Tall expensive bars are your best load-shifting targets.</p>
+          <canvas id="tier-chart"></canvas>
+        </div>
+      </div>
+
+      <div id="opt-tips" class="opt-tips"></div>
     </section>
 
   </main>

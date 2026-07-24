@@ -1,4 +1,4 @@
-# ⚡ Energy Compare Tool
+# Energy Compare Tool
 
 A static, browser-only web app that helps you find the **cheapest electricity plan for your actual usage**. Upload your smart-meter interval export, enter the details of one or more plans (flat or time-of-use), and it plots your usage and ranks the plans by estimated annual cost.
 
@@ -14,8 +14,13 @@ A static, browser-only web app that helps you find the **cheapest electricity pl
   - Separate controlled-load rate (e.g. hot water)
   - Solar feed-in credit (for exported energy)
   - Pay-on-time / membership % discount
-- **The verdict** — every plan is costed against *your* usage, scaled to a full year, with a ranked table and comparison chart. Cheapest wins. 🏆
-- Plans are saved in your browser (`localStorage`) so they're still there next time.
+- **The verdict** — every plan is costed against *your* usage, scaled to a full year, with a ranked table and comparison chart. Cheapest wins.
+- **Rich comparison graphs:**
+  - **Daily usage vs cost** — overlays how much you *spend* each half-hour (bars) against how much you *use* (line) on a selected plan, so you can see exactly when a plan hits hardest.
+  - **Bill breakdown** — a stacked chart splitting each plan's annual cost into general usage, controlled load and supply charge (less solar credit).
+  - **Cost by month** — tracks each plan across the months in your data to reveal seasonal swings.
+- **Load-shifting advisor** — for time-of-use plans, works out how much of your usage lands in expensive peak/shoulder periods, groups your spend by rate tier, and lets you drag a slider to estimate savings from moving flexible load (dishwasher, washing, dryer, pool pump, EV charging) to off-peak — with tips that name your plan's actual peak windows.
+- **Saved & portable plans** — plans are stored in your browser (`localStorage`) so they persist between visits, plus **Export/Import** to back them up as a JSON file or move them to another device.
 
 ## How costs are calculated
 
