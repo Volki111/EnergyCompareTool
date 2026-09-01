@@ -29,26 +29,29 @@ A **static, browser-only** single-page web app for Australian households to find
 
 ## 2. High-level architecture (Cloudflare)
 
+> **This project is hosted on GitLab, not GitHub — there are no GitHub Actions.** The scheduler is **GitLab CI/CD scheduled pipelines**, and deploys go to Cloudflare Pages via **`wrangler pages deploy`** (direct upload). Cloudflare Pages does support connecting a GitLab repo for git-driven builds, but because the CDR crawl may be blocked from Cloudflare's own build IPs (see §8.1), the recommended pattern runs the crawl on a **GitLab runner** you control and uploads the result.
+
 ```mermaid
 flowchart LR
-  subgraph Build["Cloudflare Pages build (Node CI, no subrequest cap)"]
+  subgraph CI["GitLab CI job (scheduled pipeline, Node image + curl)"]
     FETCH["scripts/fetch-plans.mjs\n(curl → CDR APIs → normalise)"]
-    FETCH --> PJSON["data/plans.json (compact)"]
+    FETCH --> PJSON["public/data/plans.json (compact)"]
+    PJSON --> WR["npx wrangler pages deploy public"]
   end
+  SCHED["GitLab pipeline schedule (daily)"] --> CI
+  WR -->|direct upload| Static
   subgraph Static["Cloudflare Pages (static hosting + CDN)"]
     HTML["index.html + css + js"]
-    PJSON
-    NMIJSON["data/nmi-networks.json"]
+    DATA["data/plans.json + data/nmi-networks.json"]
   end
-  CRON["Worker Cron Trigger (daily)"] -->|POST| HOOK["Pages Deploy Hook"]
-  HOOK -->|rebuild| Build
   Browser["User browser"] -->|fetch static| Static
-  Build -->|deploy| Static
 ```
 
-**Chosen approach:** Cloudflare Pages hosts the static app. `data/plans.json` is **generated at build time** by running the fetch script as the Pages build command. A **Worker Cron Trigger** pings a **Pages Deploy Hook** once a day, which re-runs the build and thus refreshes the catalogue. This mirrors the current GitHub Actions design almost 1:1 and stays entirely on Cloudflare's free tier.
+**Chosen approach (GitLab-native):** a **GitLab CI/CD scheduled pipeline** runs the crawl on a GitLab runner (full Node, no subrequest cap, curl available), then **`wrangler pages deploy`** uploads the built site (including the fresh `data/plans.json`) directly to Cloudflare Pages. GitLab's own scheduler does the "daily" part, so **no Cloudflare Worker and no deploy hook are needed**. Everything is free (GitLab free CI minutes + Cloudflare Pages free tier).
 
-Why not "a Worker fetches the data on a schedule and writes it to KV/R2"? Because the fetch makes **~2,000+ outbound requests** and Cloudflare Workers on the free plan cap **subrequests at 50 per invocation** (1,000 on paid). A single Worker invocation cannot do the full crawl. Pages **builds** run in a full Node container with **no subrequest cap**, so the crawl belongs in the build. (An alternative chunked-Worker design is in §7.4 if you ever want the data decoupled from deploys.)
+Two viable alternatives are documented in §6.3–§6.4: (A) connect the GitLab repo to Cloudflare Pages and let **Cloudflare's build** run the crawl, triggered daily by a **Worker Cron → Pages Deploy Hook**; (B) a chunked scheduled **Worker → R2/KV** if you ever want the data decoupled from deploys.
+
+Why not "a Worker fetches the data on a schedule and writes it to KV/R2" as the default? Because the crawl makes **~2,000+ outbound requests** and Cloudflare Workers on the free plan cap **subrequests at 50 per invocation** (1,000 on paid). A single Worker invocation cannot do the full crawl. GitLab CI runners (and Cloudflare Pages builds) have **no subrequest cap**, so the crawl belongs there.
 
 ---
 
@@ -186,7 +189,7 @@ function curlJson(url, versions = [3,2,1]) {
 }
 ```
 
-**Cloudflare implication:** the Pages **build** container has `curl` and works like a normal Linux box. **Risk:** the CDR WAF may also block Cloudflare's build egress IPs (it blocks some datacenter ranges). This is the single biggest replication risk — see §9.1 for mitigations (curl works from GitHub runners today; if Cloudflare build IPs are blocked, fall back to the hybrid in §7.4).
+**GitLab/Cloudflare implication:** the crawl runs in a **GitLab CI** job (Node image + `curl`), which behaves like a normal Linux box. **Risk:** the CDR WAF may block whole datacenter IP ranges — whether GitLab's shared-runner IPs are blocked is unverified. This is the single biggest replication risk — see **§8.1** for the test-first check and mitigations (different runner image/region, or a self-hosted runner with a clean IP).
 
 ### 5.3 Endpoint discovery (three sources, merged + pre-probed)
 
@@ -275,15 +278,14 @@ Offline unit tests (no network) asserting: dollars→cents; flat/TOU/controlled/
 
 ## 6. Cloudflare implementation
 
-### 6.1 Cloudflare Pages (hosting + build)
+### 6.1 Cloudflare Pages (hosting)
 
-- Create a Pages project connected to the Git repo (GitHub/GitLab), **or** deploy via `wrangler pages deploy`.
-- **Build configuration:**
-  - **Build command:** `npm run build` where `package.json` has `"build": "node scripts/test-normalize.mjs && node scripts/fetch-plans.mjs"`.
-  - **Build output directory:** the repo root (the folder containing `index.html`). If you prefer a clean output dir, move static files under `public/` and set output to `public/` (the build script must then write `public/data/plans.json`).
-  - **Environment variables:** `NODE_VERSION=20`, and the `MAX_*` knobs from §5.5.
-- Free tier: unlimited requests/bandwidth, unlimited sites, **500 builds/month** (a daily rebuild uses ~30). Build time limit 20 min (the crawl runs in ~3–5 min).
-- Result: `index.html`, assets, and a freshly generated `data/plans.json` are served from Cloudflare's CDN. **No Worker needed to serve data** — it's a static asset.
+Two ways to get files onto Pages; this project uses **direct upload from GitLab CI** (§6.3) as the primary, with git-connected build as an alternative (§6.4).
+
+- **Direct upload (recommended here):** `npx wrangler pages deploy <dir> --project-name=<name>`. Create the Pages project once (dashboard → Workers & Pages → Create → Pages → *Direct upload*, or `wrangler pages project create`). No git connection required — GitLab CI pushes each build. This decouples the crawl from Cloudflare's build IPs (see §8.1).
+- **Git-connected build (alternative):** connect the GitLab repo in the Pages dashboard and set a build command; Cloudflare's build container runs the crawl (§6.4).
+- **Static layout:** put the site under `public/` (`public/index.html`, `public/css`, `public/js`, `public/data/...`). The build script writes `public/data/plans.json`. Deploy dir = `public`.
+- Free tier: unlimited requests/bandwidth, unlimited sites; direct-upload deploys are effectively unlimited. `data/plans.json` is served as a static asset from Cloudflare's CDN — **no Worker needed to serve data**.
 
 ### 6.2 `_headers` (caching + security)
 
@@ -300,41 +302,73 @@ Offline unit tests (no network) asserting: dollars→cents; flat/TOU/controlled/
 ```
 (Optionally add a strict `Content-Security-Policy`; since Chart.js is vendored and there are no third-party scripts, `script-src 'self'` works — allow `'unsafe-inline'` only if you keep inline scripts, otherwise move them to files.)
 
-### 6.3 Scheduled refresh — Worker Cron Trigger → Pages Deploy Hook (PRIMARY)
+### 6.3 Scheduled refresh — GitLab CI pipeline + `wrangler pages deploy` (PRIMARY)
 
-1. In the Pages project settings, create a **Deploy Hook** (Settings → Builds & deployments → Deploy hooks). You get a URL like `https://api.cloudflare.com/client/v4/pages/webhooks/deploy_hooks/<id>`.
-2. Create a tiny Worker with a **Cron Trigger** that POSTs to it. `wrangler.toml`:
+The crawl and the deploy both run in one GitLab CI job; GitLab's **pipeline schedule** makes it daily. No Cloudflare Worker, no deploy hook.
+
+**`.gitlab-ci.yml`:**
+```yaml
+stages: [test, deploy]
+
+variables:
+  NODE_VERSION: "20"
+
+unit-tests:
+  stage: test
+  image: node:20
+  script:
+    - node scripts/test-normalize.mjs
+
+build-and-deploy:
+  stage: deploy
+  image: node:20            # Debian-based → curl is available (install if slim)
+  script:
+    - apt-get update && apt-get install -y curl   # if not already present
+    - node scripts/fetch-plans.mjs                 # writes public/data/plans.json
+    - npx --yes wrangler@3 pages deploy public
+        --project-name "$CF_PAGES_PROJECT"
+        --branch main
+        --commit-dirty=true
+  variables:
+    CLOUDFLARE_API_TOKEN: "$CLOUDFLARE_API_TOKEN"  # from CI/CD variables (masked)
+    CLOUDFLARE_ACCOUNT_ID: "$CLOUDFLARE_ACCOUNT_ID"
+    OUT_FILE: "public/data/plans.json"
+    MAX_PLANS: "2600"
+    MAX_PER_RETAILER: "120"
+    MAX_PER_NETWORK: "8"
+```
+
+Setup:
+1. **Cloudflare API token** — dashboard → My Profile → API Tokens → Create, permission **Account · Cloudflare Pages · Edit**. Copy the token and your **Account ID**.
+2. **GitLab CI/CD variables** (Settings → CI/CD → Variables, masked/protected): `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CF_PAGES_PROJECT` (your Pages project name). `wrangler` reads the first two from the environment automatically.
+3. **Schedule** — Settings → CI/CD → **Pipeline schedules** → New schedule, cron `0 17 * * *` (17:00 UTC ≈ 03:00 AEST), target branch `main`. Each run crawls fresh data and redeploys. (Regular pushes to `main` also deploy, giving you code + data deploys from the same pipeline.)
+
+Note: make `fetch-plans.mjs` honour `OUT_FILE` (it already does) so it writes into `public/data/`. Keep `data/nmi-networks.json` and the placeholder `data/plans.json` under `public/data/` in the repo so pushes deploy a working site even before the first scheduled crawl.
+
+### 6.4 (Alternative A) Git-connected Cloudflare Pages build + Worker Cron → Deploy Hook
+
+If you'd rather Cloudflare build from the connected GitLab repo:
+1. Connect the GitLab repo in the Pages dashboard; build command `npm run build` (`"build": "node scripts/test-normalize.mjs && node scripts/fetch-plans.mjs"`), output dir `public`, env `NODE_VERSION=20` + `MAX_*`.
+2. Create a **Deploy Hook** (Pages → Settings → Builds & deployments). Schedule daily rebuilds with a tiny **Worker Cron Trigger** that POSTs the hook:
    ```toml
+   # wrangler.toml
    name = "energy-compare-refresh"
    main = "worker/refresh.js"
    compatibility_date = "2024-11-01"
-
    [triggers]
-   crons = ["0 17 * * *"]   # daily 17:00 UTC ≈ 03:00 AEST
+   crons = ["0 17 * * *"]
    ```
-   `worker/refresh.js`:
    ```js
-   export default {
-     async scheduled(_event, env, _ctx) {
-       await fetch(env.DEPLOY_HOOK_URL, { method: "POST" });
-     },
-   };
+   // worker/refresh.js
+   export default { async scheduled(_e, env) { await fetch(env.DEPLOY_HOOK_URL, { method: "POST" }); } };
    ```
-   Store the hook URL as a secret: `wrangler secret put DEPLOY_HOOK_URL`. Deploy: `wrangler deploy`.
-3. Each firing triggers a Pages rebuild → the build re-runs `fetch-plans.mjs` → fresh catalogue deployed. **One subrequest per day** — trivially within free limits. Cron Triggers are free.
+   `wrangler secret put DEPLOY_HOOK_URL` then `wrangler deploy`.
 
-### 6.4 (Alternative) Decoupled data via Worker + R2/KV — only if you must
+Caveat: this runs the crawl on **Cloudflare's build IPs**, which may be WAF-blocked (§8.1). The §6.3 GitLab-runner path avoids that risk, which is why it's primary.
 
-If you want the data refreshed **without** redeploying (e.g. hourly, or to keep builds purely for code), a Worker can crawl and write `plans.json` to **R2** (object storage, free tier: 10 GB + free egress via Workers) or **KV**, and a Pages Function serves it. **But** free Workers cap **50 subrequests/invocation**, so a single invocation cannot crawl ~2,000 endpoints. You must **chunk**:
-- A **cron Worker** enqueues retailer jobs (or stores a work-list in KV).
-- A **consumer** (Cloudflare **Queues** or successive cron invocations) processes a few retailers per run (staying under the subrequest cap), accumulating normalised plans in KV; a final step assembles and writes `plans.json` to R2.
-- Also verify the CDR WAF accepts the Workers runtime's `fetch` (it may not — Workers can't shell out to `curl`; if the WAF blocks it, this path is blocked and you must use the build approach).
+### 6.5 (Alternative B) Decoupled data via Worker + R2/KV — only if you must
 
-This is materially more complex and has a hard dependency on the WAF accepting Workers `fetch`. **Recommend the build-hook approach (§6.3) unless you have a concrete need.**
-
-### 6.5 Hybrid fallback (if Cloudflare build IPs are WAF-blocked)
-
-Keep the data crawl on a **GitHub Action** (proven to work with `curl`) that commits `data/plans.json`. Point Cloudflare Pages at that repo but with **no build step** (just serve the committed files). You still host on Cloudflare Pages; only the crawl runs on GitHub. Fully free.
+To refresh data **without** redeploying, a Worker could crawl and write `plans.json` to **R2** (10 GB free, free egress via Workers) or **KV**. **But** free Workers cap **50 subrequests/invocation**, so one invocation can't crawl ~2,000 endpoints — you must **chunk** across invocations/**Queues** (a few retailers each, accumulate in KV, assemble at the end). It also depends on the CDR WAF accepting the Workers `fetch` (Workers can't shell out to `curl`), which is unverified and likely to fail. Not recommended unless you have a concrete need.
 
 ### 6.6 Optional free Cloudflare extras
 
@@ -344,20 +378,21 @@ Keep the data crawl on a **GitHub Action** (proven to work with `curl`) that com
 
 ---
 
-## 7. Step-by-step setup (primary path)
+## 7. Step-by-step setup (GitLab + Cloudflare Pages, primary path)
 
-1. Create the repo with the layout in §3; copy the frontend (`index.html`, `css/`, `js/` incl. vendored `chart.umd.min.js`, `sample/`) and `scripts/` verbatim from the reference implementation.
+1. Create the GitLab repo with the layout in §3, static files under `public/`. Copy the frontend (`public/index.html`, `public/css/`, `public/js/` incl. vendored `chart.umd.min.js`, `public/sample/`) and `scripts/` verbatim from the reference implementation.
 2. `package.json`:
    ```json
    { "private": true, "type": "module",
      "scripts": { "build": "node scripts/test-normalize.mjs && node scripts/fetch-plans.mjs",
                   "test": "node scripts/test-normalize.mjs" } }
    ```
-3. Commit `data/nmi-networks.json` and `data/retailers.json`. Commit a placeholder `data/plans.json` (`{"planCount":0,"plans":[]}`) so the app runs before the first build.
-4. Push to GitHub/GitLab. In Cloudflare dashboard → **Workers & Pages → Create → Pages → Connect to Git**. Set build command `npm run build`, output dir root (or `public/`), `NODE_VERSION=20`, `MAX_*` vars.
-5. Trigger the first deploy; confirm `https://<project>.pages.dev/` serves the app and `/data/plans.json` has real plans. If the crawl returns mostly failures, you've hit the WAF (§9.1) — switch to §6.5.
-6. Add `_headers` (§6.2). Create a **Deploy Hook**; deploy the **cron Worker** (§6.3) with the hook URL as a secret.
-7. (Optional) custom domain, Web Analytics.
+   Ensure `scripts/fetch-plans.mjs` writes to `OUT_FILE` (default it to `public/data/plans.json`).
+3. Commit `public/data/nmi-networks.json` and `data/retailers.json`, plus a placeholder `public/data/plans.json` (`{"planCount":0,"plans":[]}`) so the site works before the first crawl.
+4. Create the Cloudflare Pages project (once): `npx wrangler pages project create <name>` (or dashboard → Pages → *Direct upload*). Create a Cloudflare **API token** (Account · Cloudflare Pages · Edit) and note the **Account ID**.
+5. Add GitLab **CI/CD variables** (masked): `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CF_PAGES_PROJECT`. Add `.gitlab-ci.yml` from §6.3.
+6. Push. The pipeline runs tests → crawl → `wrangler pages deploy public`. Confirm `https://<name>.pages.dev/` serves the app and `/data/plans.json` has real plans. **If the crawl returns mostly failures/403s, GitLab-runner IPs are WAF-blocked (§8.1)** — try a different runner/image, or self-host a runner.
+7. Add **Pipeline schedule** (daily) per §6.3. Add `public/_headers` (§6.2). (Optional) custom domain, Web Analytics.
 
 **Acceptance criteria:** upload the sample CSV → usage charts render; add two plans → verdict + charts; "Load a published plan" shows ~2,000 plans; a real NMI (`6305…` = AusNet/VIC) auto-selects the network; postcode `2000` filters to ~200 Sydney plans and includes AGL/Origin/EnergyAustralia/Red; `node scripts/test-normalize.mjs` passes.
 
@@ -365,10 +400,12 @@ Keep the data crawl on a **GitHub Action** (proven to work with `curl`) that com
 
 ## 8. Known risks & mitigations
 
+**§8.1 — The #1 risk:** the CDR WAF **always blocks Node `fetch`** (use `curl`) and **may block whole datacenter IP ranges**. The crawl is known to work from GitHub-hosted runners; whether **GitLab's shared runners** (or **Cloudflare's build IPs**) are blocked is **unverified — test first** with a single retailer (`curl -H "x-v: 1" https://cdr.energymadeeasy.gov.au/agl/cds-au/v1/energy/plans?page-size=1`). If blocked: try a different runner image/region, or register a **self-hosted GitLab runner** (e.g. a small VM / your own IP) for the `build-and-deploy` job — that runner's IP is very unlikely to be blocked. As a last resort, run the crawl anywhere with a clean IP and `wrangler pages deploy` from there.
+
 | # | Risk | Mitigation |
 |---|------|-----------|
-| 1 | **CDR WAF blocks Cloudflare build egress IPs** (blocks datacenter ranges; blocks Node `fetch` always). | Build uses `curl` (works from GitHub runners). If Cloudflare build IPs are blocked: use the hybrid (§6.5) — crawl on GitHub Actions, host on Pages. Test early with one retailer. |
-| 2 | **Worker 50-subrequest cap** makes a single-invocation crawl impossible on free. | Crawl in the Pages **build** (no cap), not a Worker. Worker only pings the deploy hook. |
+| 1 | **CDR WAF blocks the crawl** (Node `fetch` always; some datacenter IPs). | Use `curl` (done). Run the crawl on a GitLab runner; if its IP is blocked, use a self-hosted runner (§8.1). Test early with one retailer. |
+| 2 | **Worker 50-subrequest cap** makes a single-invocation crawl impossible on free. | Crawl in **GitLab CI** (no cap), not a Worker. Any Worker used is only for pinging a deploy hook (§6.4). |
 | 3 | Retailer coverage skew. | Network-aware sampling (§5.5). |
 | 4 | Bad tariff data skews comparisons. | Sanity bounds (§5.4 gotcha #5); skip demand-only/gas. |
 | 5 | Community endpoint list unavailable. | Register + curated seed as fallbacks; dedupe/pre-probe tolerates missing sources. |
